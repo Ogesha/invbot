@@ -128,12 +128,13 @@ def get_employee_data_safe(employee_id):
             'full_name': emp.full_name,
             'department_name': emp.department.name if emp.department else None,
             'is_approved': emp.is_approved,
+            'telegram_id': emp.telegram_id,
         }
     except Employee.DoesNotExist:
         return None
 
 @sync_to_async
-def update_employee(employee_id, full_name=None, department_id=None, is_approved=None):
+def update_employee(employee_id, full_name=None, department_id=None, is_approved=None, telegram_id=...):
     try:
         emp = Employee.objects.get(id=employee_id)
         if full_name is not None:
@@ -142,6 +143,8 @@ def update_employee(employee_id, full_name=None, department_id=None, is_approved
             emp.department_id = department_id
         if is_approved is not None:
             emp.is_approved = is_approved
+        if telegram_id is not ...:
+            emp.telegram_id = telegram_id
         emp.save()
         return emp
     except Employee.DoesNotExist:

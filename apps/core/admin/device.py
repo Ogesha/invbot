@@ -76,9 +76,18 @@ class BaseDeviceAdmin(admin.ModelAdmin):
     inlines = [QRCodeInline, DeviceHistoryInline]
     actions = ['generate_qr_codes', 'print_qr_codes', 'export_to_excel', 'generate_qr_codes_with_path']
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related('qr_code')
+
     def qr_code_link(self, obj):
-        if hasattr(obj, 'qr_code') and obj.qr_code:
-            return f"QR {obj.qr_code.code}"
+        try:
+            qr = obj.qr_code
+        except QRCode.DoesNotExist:
+            qr = None
+
+        if qr:
+            return format_html("<b>ID {}</b><br>{}", qr.id, qr.code)
         return "—"
     qr_code_link.short_description = "QR-код"
 
@@ -214,7 +223,7 @@ class QRCodeAdmin(admin.ModelAdmin):
     list_display = ('id', 'code', 'device', 'created_at', 'is_active', 'image_preview')
     list_filter = ('is_active', 'created_at', 'device__department')
     search_fields = ('code', 'device__inventory_number')
-    readonly_fields = ('image_preview_detail', 'device_short_info')
+    readonly_fields = ('id', 'image_preview_detail', 'device_short_info')
     autocomplete_fields = ['device']
     actions = [
         'deactivate_qr', 'activate_qr', 'regenerate_image',
@@ -223,7 +232,7 @@ class QRCodeAdmin(admin.ModelAdmin):
     ]
 
     fieldsets = (
-        (None, {'fields': ('code', 'device', 'is_active')}),
+        (None, {'fields': ('id', 'code', 'device', 'is_active', 'device_short_info')}),
         ('Изображение', {'fields': ('image', 'image_preview_detail'), 'classes': ('wide',)}),
     )
 
@@ -259,21 +268,12 @@ class QRCodeAdmin(admin.ModelAdmin):
 
     def device_short_info(self, obj):
         if obj.device:
-            if hasattr(obj.device, 'printer'):
-                return format_html(
-                    "ID QR: {}<br>Инв. №: {}",
-                    obj.id,
-                    obj.device.inventory_number
-                )
-            else:
-                return format_html(
-                    "ID QR: {}<br>Код: {}<br>Устройство: {}<br>Инв. №: {}<br>Тип: {}",
-                    obj.id,
-                    obj.code,
-                    obj.device.name,
-                    obj.device.inventory_number,
-                    obj.device.device_type.name if obj.device.device_type else '—'
-                )
+            return format_html(
+                "ID QR: {}<br>Устройство: {}<br>Инв. №: {}",
+                obj.id,
+                obj.device.name,
+                obj.device.inventory_number,
+            )
         return "—"
     device_short_info.short_description = "Информация об устройстве"
 

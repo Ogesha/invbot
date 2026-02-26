@@ -45,6 +45,7 @@ async def employee_edit_card(callback: CallbackQuery):
         f"👤 <b>{emp_data['full_name']}</b>\n"
         f"Отдел: {emp_data['department_name'] or '—'}\n"
         f"Статус: {'✅ Подтверждён' if emp_data['is_approved'] else '⏳ Ожидает'}\n"
+        f"Telegram ID: {emp_data['telegram_id'] or '—'}\n"
         f"ID: {emp_data['id']}"
     )
     kb = employee_edit_keyboard(emp_id)
@@ -114,6 +115,45 @@ async def process_new_employee_dept(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("❌ Ошибка при обновлении.")
     await state.clear()
     await back_to_main_menu(callback, callback.from_user.id)
+
+@router.callback_query(F.data.startswith("emp_edit_tgid_"))
+async def edit_employee_tg_id_start(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет прав", show_alert=True)
+        return
+    emp_id = int(callback.data.split("_")[-1])
+    await state.update_data(emp_id=emp_id)
+    await callback.message.edit_text(
+        "Введите Telegram ID сотрудника (только число).\nЧтобы отвязать Telegram ID, отправьте '-'",
+        reply_markup=cancel_keyboard()
+    )
+    await state.set_state(EditEmployeeStates.waiting_for_new_telegram_id)
+    await callback.answer()
+
+
+@router.message(EditEmployeeStates.waiting_for_new_telegram_id)
+async def process_new_employee_tg_id(message: Message, state: FSMContext):
+    raw_value = message.text.strip()
+    if raw_value == '-':
+        telegram_id = None
+    else:
+        if not raw_value.lstrip('-').isdigit():
+            await message.answer("Telegram ID должен быть числом. Повторите ввод или отправьте '-'.")
+            return
+        telegram_id = int(raw_value)
+
+    data = await state.get_data()
+    emp_id = data['emp_id']
+    emp = await update_employee(emp_id, telegram_id=telegram_id)
+
+    if emp:
+        shown_id = telegram_id if telegram_id is not None else '—'
+        await message.answer(f"✅ Telegram ID сотрудника обновлён: {shown_id}")
+    else:
+        await message.answer("❌ Ошибка при обновлении Telegram ID.")
+
+    await state.clear()
+    await back_to_main_menu(message, message.from_user.id)
 
 # ---------- Подтверждение сотрудника ----------
 @router.callback_query(F.data.startswith("emp_approve_"))
