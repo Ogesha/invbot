@@ -3,7 +3,7 @@ from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
 from django.contrib import messages
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.files import File
@@ -88,7 +88,7 @@ class BaseDeviceAdmin(admin.ModelAdmin):
             qr = None
 
         if qr:
-            return format_html("<b>ID {}</b><br>{}", qr.id, qr.code)
+            return format_html('<b>ID: {}</b><br><span style="font-size:11px;">{}</span>', qr.id, qr.code)
         return "—"
     qr_code_link.short_description = "QR-код"
 
@@ -118,8 +118,26 @@ class BaseDeviceAdmin(admin.ModelAdmin):
     generate_qr_codes.short_description = "Сгенерировать QR-коды"
 
     def print_qr_codes(self, request, queryset):
-        self.message_user(request, "Функция печати QR-кодов будет реализована отдельно.", messages.WARNING)
-    print_qr_codes.short_description = "Подготовить QR-коды к печати"
+        items = []
+        for device in queryset.select_related('device_type'):
+            qr, _ = QRCode.objects.get_or_create(device=device)
+            if not qr.image:
+                qr.generate_image()
+                qr.refresh_from_db(fields=['image'])
+
+            items.append({
+                'device': device,
+                'qr': qr,
+                'image_url': qr.image.url if qr.image else None,
+            })
+
+        context = {
+            'title': 'Печать QR-кодов',
+            'items': items,
+            'opts': self.model._meta,
+        }
+        return render(request, 'admin/print_qr_codes.html', context)
+    print_qr_codes.short_description = "Печать QR-кодов"
 
     def export_to_excel(self, request, queryset):
         fields = [
