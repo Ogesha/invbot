@@ -2,7 +2,7 @@ import logging
 import os
 
 import qrcode
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -31,43 +31,6 @@ def _build_qr_image(data: str, box_size: int = 10, border: int = 2) -> Image.Ima
     return qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
 
-def _get_font(size: int) -> ImageFont.ImageFont:
-    try:
-        return ImageFont.truetype("DejaVuSans.ttf", size)
-    except Exception:
-        return ImageFont.load_default()
-
-
-def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
-    bbox = draw.textbbox((0, 0), text, font=font)
-    return bbox[2] - bbox[0], bbox[3] - bbox[1]
-
-
-def _compose_device_qr(qr_img: Image.Image, device, qr_code) -> Image.Image:
-    width, height = qr_img.size
-    canvas_height = height + 110
-    canvas = Image.new("RGB", (width, canvas_height), "white")
-    canvas.paste(qr_img, (0, 0))
-
-    draw = ImageDraw.Draw(canvas)
-    title_font = _get_font(18)
-    body_font = _get_font(14)
-
-    lines = [
-        f"Инв. №: {device.inventory_number}",
-        f"{device.name}",
-        f"ID SQL: {qr_code.id}",
-    ]
-    y = height + 8
-    for i, line in enumerate(lines):
-        font = title_font if i == 0 else body_font
-        text_w, text_h = _text_size(draw, line, font)
-        draw.text(((width - text_w) // 2, y), line, fill="black", font=font)
-        y += text_h + 4
-
-    return canvas
-
-
 def generate_qr_image_for_device(device, target_dir=None):
     qr_code = device.qr_code
     qr_data = _build_start_link(qr_code.code)
@@ -80,8 +43,7 @@ def generate_qr_image_for_device(device, target_dir=None):
 
     try:
         qr_img = _build_qr_image(qr_data)
-        composed = _compose_device_qr(qr_img, device, qr_code)
-        composed.save(filepath, format="PNG")
+        qr_img.save(filepath, format="PNG")
         logger.info("Device QR saved to %s", filepath)
         return filepath
     except Exception:

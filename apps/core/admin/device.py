@@ -98,10 +98,17 @@ class BaseDeviceAdmin(admin.ModelAdmin):
 
     def generate_qr_codes(self, request, queryset):
         generated = 0
+        reused = 0
         errors = 0
+
         for device in queryset:
             try:
-                qr, _ = QRCode.objects.get_or_create(device=device)
+                qr, created = QRCode.objects.get_or_create(device=device)
+
+                if not created and qr.image:
+                    reused += 1
+                    continue
+
                 filepath = generate_qr_image_for_device(device)
                 if filepath and os.path.exists(filepath):
                     with open(filepath, 'rb') as f:
@@ -112,8 +119,13 @@ class BaseDeviceAdmin(admin.ModelAdmin):
                     errors += 1
             except Exception:
                 errors += 1
+
         level = messages.SUCCESS if errors == 0 else messages.WARNING
-        self.message_user(request, f"Сгенерировано QR: {generated}. Ошибок: {errors}.", level=level)
+        self.message_user(
+            request,
+            f"Сгенерировано новых QR: {generated}. Уже были готовы: {reused}. Ошибок: {errors}.",
+            level=level,
+        )
         return redirect(request.get_full_path())
     generate_qr_codes.short_description = "Сгенерировать QR-коды"
 
