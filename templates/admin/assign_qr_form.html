@@ -1,0 +1,24 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>Привязка QR-кодов к устройству</h1>
+<p>Выбрано QR-кодов: {{ qr_ids|length|default:"?" }}</p>
+<form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="qr_ids" value="{{ qr_ids }}">
+    <p>
+        <label for="device_id">Выберите устройство:</label><br>
+        <select name="device_id" id="device_id" required style="min-width: 300px;">
+            <option value="">-- Выберите --</option>
+            {% for device in devices %}
+                <option value="{{ device.id }}">
+                    {{ device.inventory_number }} – {{ device.name }}
+                </option>
+            {% endfor %}
+        </select>
+    </p>
+    <p>
+        <input type="submit" value="Привязать" class="default">
+        <a href="{% url 'admin:core_qrcode_changelist' %}" class="button">Отмена</a>
+    </p>
+</form>
+{% endblock %}

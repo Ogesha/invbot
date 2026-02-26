@@ -1,0 +1,18 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>Генерация QR-кодов с выбором пути</h1>
+<p>Выбрано устройств: {{ ids|length|default:"?" }}</p>
+<form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="ids" value="{{ ids }}">
+    <p>
+        <label for="path">Путь для сохранения (относительно media):</label><br>
+        <input type="text" name="path" id="path" value="qrcodes" size="50">
+        <br><small>Оставьте пустым для папки по умолчанию "qrcodes"</small>
+    </p>
+    <p>
+        <input type="submit" value="Сгенерировать">
+        <a href="{% url 'admin:core_device_changelist' %}">Отмена</a>
+    </p>
+</form>
+{% endblock %}

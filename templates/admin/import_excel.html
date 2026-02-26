@@ -1,0 +1,269 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    :root {
+        --primary-color: #79aec8;
+        --success-color: #28a745;
+        --error-color: #dc3545;
+        --warning-color: #ffc107;
+    }
+    #progress-container {
+        margin-top: 20px;
+        display: none;
+    }
+    .progress {
+        height: 30px;
+        background-color: #f0f0f0;
+        border-radius: 15px;
+        overflow: hidden;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,.1);
+    }
+    .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, var(--primary-color), #4a7b9f);
+        transition: width 0.4s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+    }
+    #results {
+        margin-top: 30px;
+        display: none;
+    }
+    .stats-card {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        display: flex;
+        gap: 20px;
+    }
+    .stat-item {
+        flex: 1;
+        text-align: center;
+    }
+    .stat-number {
+        font-size: 2.5em;
+        font-weight: bold;
+        color: var(--primary-color);
+    }
+    .stat-label {
+        color: #666;
+        font-size: 0.9em;
+    }
+    .details-container, .errors-container {
+        background: #f9f9f9;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        max-height: 300px;
+        overflow-y: auto;
+        box-shadow: inset 0 0 5px rgba(0,0,0,0.05);
+    }
+    .detail-item {
+        padding: 8px;
+        border-bottom: 1px solid #eee;
+    }
+    .detail-item:last-child {
+        border-bottom: none;
+    }
+    .detail-item.success {
+        color: var(--success-color);
+    }
+    .detail-item.error {
+        color: var(--error-color);
+    }
+    .error-item {
+        padding: 8px;
+        color: var(--error-color);
+        background: #ffe6e6;
+        border-radius: 4px;
+        margin-bottom: 5px;
+    }
+    .submit-row button[type="submit"] {
+        background: var(--primary-color);
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: bold;
+        transition: background 0.3s;
+    }
+    .submit-row button[type="submit"]:hover {
+        background: #4a7b9f;
+    }
+    .submit-row button[type="submit"]:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+    .file-input-wrapper {
+        margin: 20px 0;
+    }
+    .file-input-wrapper input[type="file"] {
+        padding: 10px;
+        border: 2px dashed var(--primary-color);
+        border-radius: 8px;
+        width: 100%;
+        cursor: pointer;
+    }
+    .file-input-wrapper input[type="file"]:hover {
+        border-color: #4a7b9f;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <h1>Импорт устройств из Excel</h1>
+    <p>Загрузите файл в формате .xlsx, содержащий листы "Гродно ПК" и "Гродно и бюро печатная техника".</p>
+
+    <form id="import-form" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="file-input-wrapper">
+            <input type="file" name="excel_file" accept=".xlsx" required id="file-input">
+        </div>
+        <div class="submit-row">
+            <button type="submit" class="default" id="submit-btn">
+                <span class="spinner" style="display: none;">⏳</span>
+                Загрузить и импортировать
+            </button>
+            <a href="{% url 'admin:index' %}" class="button">Отмена</a>
+        </div>
+    </form>
+
+    <div id="progress-container">
+        <p>Идёт импорт, пожалуйста, подождите...</p>
+        <div class="progress">
+            <div class="progress-bar" id="progress-fill" style="width: 0%;">0%</div>
+        </div>
+    </div>
+
+    <div id="results">
+        <h2>Результаты импорта</h2>
+
+        <div class="stats-card">
+            <div class="stat-item">
+                <div class="stat-number" id="comp-count">0</div>
+                <div class="stat-label">Компьютеров обработано</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number" id="prn-count">0</div>
+                <div class="stat-label">Принтеров обработано</div>
+            </div>
+        </div>
+
+        <div id="details-container">
+            <h3>Детали обработки:</h3>
+            <div class="details-container" id="details"></div>
+        </div>
+
+        <div id="error-container" style="display: none;">
+            <h3 style="color: var(--error-color);">Ошибки:</h3>
+            <div class="errors-container" id="error-list"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('import-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    var form = e.target;
+    var fileInput = document.getElementById('file-input');
+    if (!fileInput.files[0]) {
+        alert('Пожалуйста, выберите файл');
+        return;
+    }
+
+    // Показываем прогресс
+    document.getElementById('progress-container').style.display = 'block';
+    document.getElementById('submit-btn').disabled = true;
+    document.querySelector('.spinner').style.display = 'inline-block';
+
+    var formData = new FormData(form);
+    var xhr = new XMLHttpRequest();
+
+    xhr.open('POST', "{% url 'import_devices' %}", true);
+
+    xhr.upload.addEventListener('progress', function(e) {
+        if (e.lengthComputable) {
+            var percent = Math.round((e.loaded / e.total) * 100);
+            var progressFill = document.getElementById('progress-fill');
+            progressFill.style.width = percent + '%';
+            progressFill.textContent = percent + '%';
+        }
+    });
+
+    xhr.onload = function() {
+        document.getElementById('progress-container').style.display = 'none';
+        document.getElementById('submit-btn').disabled = false;
+        document.querySelector('.spinner').style.display = 'none';
+
+        if (xhr.status === 200) {
+            try {
+                var response = JSON.parse(xhr.responseText);
+                if (response.status === 'ok') {
+                    displayResults(response.results);
+                } else {
+                    alert('Ошибка импорта: ' + response.message);
+                }
+            } catch (e) {
+                alert('Ошибка обработки ответа сервера');
+            }
+        } else {
+            alert('Ошибка сервера: ' + xhr.status);
+        }
+    };
+
+    xhr.onerror = function() {
+        document.getElementById('progress-container').style.display = 'none';
+        document.getElementById('submit-btn').disabled = false;
+        document.querySelector('.spinner').style.display = 'none';
+        alert('Сетевая ошибка. Проверьте соединение.');
+    };
+
+    xhr.send(formData);
+});
+
+function displayResults(results) {
+    document.getElementById('comp-count').textContent = results.computers;
+    document.getElementById('prn-count').textContent = results.printers;
+
+    var detailsDiv = document.getElementById('details');
+    detailsDiv.innerHTML = '';
+    results.details.forEach(function(detail) {
+        var detailItem = document.createElement('div');
+        detailItem.className = 'detail-item';
+        detailItem.textContent = detail;
+        detailsDiv.appendChild(detailItem);
+    });
+
+    var errorDiv = document.getElementById('error-list');
+    errorDiv.innerHTML = '';
+    if (results.errors && results.errors.length > 0) {
+        results.errors.forEach(function(error) {
+            var errorItem = document.createElement('div');
+            errorItem.className = 'error-item';
+            errorItem.textContent = error;
+            errorDiv.appendChild(errorItem);
+        });
+        document.getElementById('error-container').style.display = 'block';
+    } else {
+        document.getElementById('error-container').style.display = 'none';
+    }
+
+    document.getElementById('results').style.display = 'block';
+
+    // Прокрутка к результатам
+    document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+}
+</script>
+{% endblock %}

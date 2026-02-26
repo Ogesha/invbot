@@ -1,0 +1,46 @@
+{% extends "admin/change_form.html" %}
+
+{% block admin_change_form_document_ready %}
+{{ block.super }}
+<script>
+(function($) {
+    $(document).ready(function() {
+        var departmentSelect = $('#id_department');
+        var responsibleSelect = $('#id_responsible');
+
+        function updateResponsibleOptions(departmentId) {
+            var currentVal = responsibleSelect.val();
+            responsibleSelect.empty();
+            responsibleSelect.append($('<option></option>').attr('value', '').text('---------'));
+            
+            var url = '/core/get-employees-by-department/';
+            var params = departmentId ? { department_id: departmentId } : {};
+
+            $.getJSON(url, params)
+                .done(function(data) {
+                    $.each(data, function(index, emp) {
+                        var option = $('<option></option>')
+                            .attr('value', emp.id)
+                            .text(emp.full_name);
+                        if (currentVal == emp.id) {
+                            option.attr('selected', true);
+                        }
+                        responsibleSelect.append(option);
+                    });
+                })
+                .fail(function() {
+                    console.error('Ошибка загрузки сотрудников');
+                });
+        }
+
+        departmentSelect.on('change', function() {
+            updateResponsibleOptions($(this).val());
+        });
+
+        if (departmentSelect.val()) {
+            updateResponsibleOptions(departmentSelect.val());
+        }
+    });
+})(django.jQuery);
+</script>
+{% endblock %}

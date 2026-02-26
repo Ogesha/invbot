@@ -1,0 +1,17 @@
+{% for computer in computers %}
+<tr>
+    <td><a href="{% url 'admin:core_computer_change' computer.id %}">{{ computer.id }}</a></td>
+    <td>{{ computer.inventory_number }}</td>
+    <td>{{ computer.name }}</td>
+    <td>{{ computer.department.name|default:"—" }}</td>
+    <td>{{ computer.responsible.full_name|default:"—" }}</td>
+    <td>{{ computer.get_status_display }}</td>
+    <td>{{ computer.processor|default:"—" }}</td>
+    <td>{{ computer.ram|default:"—" }}</td>
+    <td>{{ computer.disk_size|default:"—" }}</td>
+</tr>
+{% empty %}
+<tr>
+    <td colspan="9">Нет компьютеров</td>
+</tr>
+{% endfor %}

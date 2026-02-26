@@ -1,0 +1,310 @@
+from django.contrib import admin
+from django.urls import reverse
+from django.utils.html import format_html
+from django.contrib import messages
+from django.shortcuts import redirect
+from django import forms
+from django.core.exceptions import ValidationError
+from django.db import models
+from ..models import Device, DeviceType, QRCode, Computer, Printer, Employee
+from ..utils import export_queryset_to_excel, export_qrcodes_with_images_to_excel
+from ...qr_generator.utils import generate_qr_image_for_device
+from .inlines import QRCodeInline, DeviceHistoryInline
+from ..tasks import generate_qr_codes_for_devices
+from django.db.models import OuterRef, Exists
+
+
+# ---------- Кастомная форма с валидацией ----------
+class DeviceAdminForm(forms.ModelForm):
+    class Meta:
+        model = Device
+        fields = '__all__'
+        widgets = {
+            'purchase_date': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date', 'placeholder': 'ГГГГ-ММ-ДД'}),
+        }
+
+    def clean_purchase_date(self):
+        value = self.cleaned_data.get('purchase_date')
+        if value == '':
+            return None
+        return value
+
+    def clean_department(self):
+        value = self.cleaned_data.get('department')
+        if value == '' or value is None:
+            return None
+        return value
+
+    def clean_responsible(self):
+        value = self.cleaned_data.get('responsible')
+        if value == '' or value is None:
+            return None
+        return value
+
+    def clean(self):
+        cleaned_data = super().clean()
+        department = cleaned_data.get('department')
+        responsible = cleaned_data.get('responsible')
+
+        if responsible and department:
+            if responsible.department != department:
+                raise ValidationError(
+                    f"Сотрудник {responsible.full_name} не принадлежит отделу {department.name}. "
+                    f"Пожалуйста, выберите сотрудника из этого отдела."
+                )
+        return cleaned_data
+
+
+# ---------- Скрытая регистрация Device ----------
+class DeviceAdminHidden(admin.ModelAdmin):
+    list_display = ('id', 'inventory_number', 'name')
+    search_fields = ('inventory_number', 'name')
+
+    def get_model_perms(self, request):
+        return {}
+
+
+admin.site.register(Device, DeviceAdminHidden)
+
+
+# ---------- Базовый класс для всех устройств ----------
+class BaseDeviceAdmin(admin.ModelAdmin):
+    form = DeviceAdminForm
+    list_display = ('id', 'inventory_number', 'name', 'department', 'responsible', 'status_display', 'qr_code_link')
+    list_filter = ('department', 'status', 'responsible')
+    search_fields = ('inventory_number', 'name', 'serial_number')
+    inlines = [QRCodeInline, DeviceHistoryInline]
+    actions = ['generate_qr_codes', 'print_qr_codes', 'export_to_excel', 'generate_qr_codes_with_path']
+
+    def qr_code_link(self, obj):
+        if hasattr(obj, 'qr_code') and obj.qr_code:
+            return f"QR {obj.qr_code.code}"
+        return "—"
+    qr_code_link.short_description = "QR-код"
+
+    def status_display(self, obj):
+        return obj.get_status_display()
+    status_display.short_description = "Статус"
+
+    def generate_qr_codes(self, request, queryset):
+        device_ids = list(queryset.values_list('id', flat=True))
+        task = generate_qr_codes_for_devices.delay(device_ids)
+        request.session['last_qr_task_id'] = task.id
+        self.message_user(
+            request,
+            f"⏳ Задача на генерацию QR-кодов для {len(device_ids)} устройств запущена. "
+            f"ID задачи: {task.id}. Результат будет доступен в логах.",
+            level=messages.INFO
+        )
+        return redirect(request.get_full_path())
+    generate_qr_codes.short_description = "Сгенерировать QR-коды (асинхронно)"
+
+    def print_qr_codes(self, request, queryset):
+        self.message_user(request, "Функция печати QR-кодов будет реализована отдельно.", messages.WARNING)
+    print_qr_codes.short_description = "Подготовить QR-коды к печати"
+
+    def export_to_excel(self, request, queryset):
+        fields = [
+            'inventory_number',
+            'name',
+            'department__name',
+            'responsible__full_name',
+            'status',
+            'serial_number',
+            'manufacturer',
+            'description',
+        ]
+        headers = [
+            'Инвентарный номер',
+            'Наименование',
+            'Отдел',
+            'Ответственный',
+            'Статус',
+            'Серийный номер',
+            'Производитель',
+            'Описание',
+        ]
+        if queryset.model is Computer:
+            fields.extend(['processor', 'ram', 'disk_size'])
+            headers.extend(['Процессор', 'ОЗУ', 'Диск'])
+        elif queryset.model is Printer:
+            fields.extend(['color_type', 'paper_format'])
+            headers.extend(['Тип печати', 'Формат'])
+        return export_queryset_to_excel(queryset, 'devices', fields, headers)
+    export_to_excel.short_description = "Экспортировать выбранные записи в Excel"
+
+    def generate_qr_codes_with_path(self, request, queryset):
+        ids = ','.join(str(obj.id) for obj in queryset)
+        return redirect(f"{reverse('generate_qr_with_path')}?ids={ids}")
+    generate_qr_codes_with_path.short_description = "Сгенерировать QR-коды с выбором папки"
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        try:
+            department_id = None
+            if request.method == 'POST':
+                dept_param = request.POST.get('department')
+                if dept_param and dept_param.isdigit():
+                    department_id = int(dept_param)
+                    print(f"POST department_id = {department_id}")
+            elif obj and obj.department:
+                department_id = obj.department.id
+                print(f"GET department_id from obj = {department_id}")
+
+            if department_id:
+                form.base_fields['responsible'].queryset = Employee.objects.filter(
+                    department_id=department_id,
+                    is_approved=True
+                ).order_by('full_name')
+            else:
+                form.base_fields['responsible'].queryset = Employee.objects.filter(
+                    is_approved=True
+                ).order_by('full_name')
+        except Exception as e:
+            print(f"Ошибка в get_form: {e}")
+            import traceback
+            traceback.print_exc()
+            form.base_fields['responsible'].queryset = Employee.objects.filter(
+                is_approved=True
+            ).order_by('full_name')
+        return form
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        print(f"get_actions для {self.__class__.__name__}: {list(actions.keys())}")
+        return actions
+
+
+# ---------- Админка для компьютеров (не регистрируется здесь) ----------
+class ComputerAdmin(BaseDeviceAdmin):
+    actions = BaseDeviceAdmin.actions
+    list_display = BaseDeviceAdmin.list_display + ('processor', 'ram', 'disk_size')
+    fieldsets = (
+        (None, {'fields': ('inventory_number', 'name', 'description')}),
+        ('Характеристики компьютера', {'fields': ('processor', 'ram', 'disk_size')}),
+        ('Расположение', {'fields': ('department', 'responsible', 'status')}),
+        ('Дополнительно', {'fields': ('serial_number', 'manufacturer', 'photo', 'purchase_date')}),
+    )
+
+    def save_model(self, request, obj, form, change):
+        from ..models import DeviceType
+        obj.device_type, _ = DeviceType.objects.get_or_create(name='Компьютер', code='PC')
+        super().save_model(request, obj, form, change)
+
+
+# ---------- Админка для принтеров (не регистрируется здесь) ----------
+class PrinterAdmin(BaseDeviceAdmin):
+    list_display = BaseDeviceAdmin.list_display + ('color_type', 'paper_format')
+    fieldsets = (
+        (None, {'fields': ('inventory_number', 'name', 'description')}),
+        ('Характеристики принтера', {'fields': ('color_type', 'paper_format')}),
+        ('Расположение', {'fields': ('department', 'responsible', 'status')}),
+        ('Дополнительно', {'fields': ('serial_number', 'manufacturer', 'photo', 'purchase_date')}),
+    )
+
+    def save_model(self, request, obj, form, change):
+        from ..models import DeviceType
+        obj.device_type, _ = DeviceType.objects.get_or_create(name='Принтер', code='PRN')
+        super().save_model(request, obj, form, change)
+
+
+# ---------- Админка для QR-кодов ----------
+@admin.register(QRCode)
+class QRCodeAdmin(admin.ModelAdmin):
+    list_display = ('id', 'code', 'device', 'created_at', 'is_active', 'image_preview')
+    list_filter = ('is_active', 'created_at', 'device__department')
+    search_fields = ('code', 'device__inventory_number')
+    readonly_fields = ('image_preview_detail', 'device_short_info')
+    autocomplete_fields = ['device']
+    actions = [
+        'deactivate_qr', 'activate_qr', 'regenerate_image',
+        'export_to_excel', 'export_to_excel_with_images',
+        'assign_to_device'
+    ]
+
+    fieldsets = (
+        (None, {'fields': ('code', 'device', 'is_active')}),
+        ('Изображение', {'fields': ('image', 'image_preview_detail'), 'classes': ('wide',)}),
+    )
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'device':
+            subquery = QRCode.objects.filter(device=OuterRef('pk'))
+            free_devices = Device.objects.annotate(has_qr=Exists(subquery)).filter(has_qr=False)
+
+            obj_id = request.resolver_match.kwargs.get('object_id') if request.resolver_match else None
+            if obj_id:
+                try:
+                    qr = self.get_queryset(request).get(pk=obj_id)
+                    kwargs['queryset'] = Device.objects.annotate(has_qr=Exists(subquery)).filter(
+                        models.Q(has_qr=False) | models.Q(pk=qr.device_id)
+                    ).order_by('inventory_number')
+                except QRCode.DoesNotExist:
+                    kwargs['queryset'] = free_devices.order_by('inventory_number')
+            else:
+                kwargs['queryset'] = free_devices.order_by('inventory_number')
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def image_preview(self, obj):
+        if obj.image:
+            return format_html('<img src="{}" width="50" height="50" style="object-fit: cover;" />', obj.image.url)
+        return "—"
+    image_preview.short_description = "Превью"
+
+    def image_preview_detail(self, obj):
+        if obj.image:
+            return format_html('<img src="{}" style="max-width: 100%; max-height: 300px;" />', obj.image.url)
+        return "Изображение не сгенерировано"
+    image_preview_detail.short_description = "Предпросмотр"
+
+    def device_short_info(self, obj):
+        if obj.device:
+            if hasattr(obj.device, 'printer'):
+                return format_html(
+                    "ID QR: {}<br>Инв. №: {}",
+                    obj.id,
+                    obj.device.inventory_number
+                )
+            else:
+                return format_html(
+                    "ID QR: {}<br>Код: {}<br>Устройство: {}<br>Инв. №: {}<br>Тип: {}",
+                    obj.id,
+                    obj.code,
+                    obj.device.name,
+                    obj.device.inventory_number,
+                    obj.device.device_type.name if obj.device.device_type else '—'
+                )
+        return "—"
+    device_short_info.short_description = "Информация об устройстве"
+
+    def deactivate_qr(self, request, queryset):
+        queryset.update(is_active=False)
+        self.message_user(request, f"Деактивировано {queryset.count()} QR-кодов.")
+    deactivate_qr.short_description = "Деактивировать выбранные QR-коды"
+
+    def activate_qr(self, request, queryset):
+        queryset.update(is_active=True)
+        self.message_user(request, f"Активировано {queryset.count()} QR-кодов.")
+    activate_qr.short_description = "Активировать выбранные QR-коды"
+
+    def regenerate_image(self, request, queryset):
+        for qr in queryset.filter(device__isnull=False):
+            qr.generate_image()
+        self.message_user(request, f"Изображения обновлены для привязанных QR-кодов.")
+    regenerate_image.short_description = "Перегенерировать изображения (только для привязанных)"
+
+    def export_to_excel(self, request, queryset):
+        fields = ['code', 'device__inventory_number', 'device__name', 'created_at', 'is_active']
+        headers = ['Код QR', 'Инв. номер', 'Название', 'Дата', 'Активен']
+        return export_queryset_to_excel(queryset, 'qrcodes', fields, headers)
+    export_to_excel.short_description = "Экспортировать в Excel (текст)"
+
+    def export_to_excel_with_images(self, request, queryset):
+        qs = queryset.select_related('device')
+        return export_qrcodes_with_images_to_excel(qs, 'qrcodes_with_images')
+    export_to_excel_with_images.short_description = "Экспортировать в Excel с изображениями"
+
+    def assign_to_device(self, request, queryset):
+        ids = ','.join(str(obj.id) for obj in queryset)
+        return redirect(f"{reverse('assign_qr_to_device')}?qr_ids={ids}")
+    assign_to_device.short_description = "Привязать QR-коды к устройству"

@@ -1,0 +1,18 @@
+{% extends "admin/change_list.html" %}
+{% load i18n static %}
+
+{% block content %}
+<div id="content-main">
+    <h1>Импорт устройств из Excel</h1>
+    <p>Загрузите файл в формате .xlsx, содержащий листы "Гродно ПК" и "Гродно и бюро печатная техника".</p>
+    <form method="post" enctype="multipart/form-data" action="{% url 'import_devices' %}">
+        {% csrf_token %}
+        <div>
+            <input type="file" name="excel_file" accept=".xlsx" required>
+        </div>
+        <div class="submit-row">
+            <input type="submit" value="Загрузить и импортировать" class="default">
+        </div>
+    </form>
+</div>
+{% endblock %}
