@@ -1,4 +1,6 @@
+import os
 from asgiref.sync import sync_to_async
+from django.core.files import File
 from apps.core.models import Employee, Device, QRCode, RegistrationRequest, DeviceType, Department
 
 # ---------- Базовые функции (используются в start.py и др.) ----------
@@ -171,8 +173,13 @@ def get_employee_devices(employee_id):
 @sync_to_async
 def create_qr_code():
     from apps.qr_generator.utils import generate_simple_qr_image_api
+
     qr = QRCode.objects.create(is_active=True)
-    qr.generate_simple_image()
+    filepath = generate_simple_qr_image_api(qr.code)
+    if filepath and os.path.exists(filepath):
+        with open(filepath, 'rb') as f:
+            qr.image.save(os.path.basename(filepath), File(f), save=False)
+        qr.save(update_fields=['image'])
     return qr
 
 @sync_to_async
@@ -199,10 +206,16 @@ def assign_qr_to_device(qr_id, device_id):
     try:
         qr = QRCode.objects.get(id=qr_id, is_active=True)
         device = Device.objects.get(id=device_id)
-        if device.qr_code and device.qr_code != qr:
-            old_qr = device.qr_code
-            old_qr.device = None
-            old_qr.save()
+
+        # Разрешаем привязку только к свободной технике (без QR)
+        try:
+            existing_qr = device.qr_code
+        except QRCode.DoesNotExist:
+            existing_qr = None
+
+        if existing_qr and existing_qr != qr:
+            return False, f"Устройство {device.inventory_number} уже имеет QR-код (ID {existing_qr.id})"
+
         qr.device = device
         qr.save()
         qr.generate_image()

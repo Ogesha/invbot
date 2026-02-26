@@ -68,11 +68,18 @@ def assign_qr_to_device(request):
         device = get_object_or_404(Device, id=device_id)
 
         for qr in qr_list:
-            if device.qr_code and device.qr_code != qr:
-                old_qr = device.qr_code
-                old_qr.device = None
-                old_qr.save()
-                old_qr.generate_simple_image()
+            try:
+                existing_qr = device.qr_code
+            except QRCode.DoesNotExist:
+                existing_qr = None
+
+            # Привязываем только к свободной технике
+            if existing_qr and existing_qr != qr:
+                messages.error(
+                    request,
+                    f"❌ Устройство {device.inventory_number} уже имеет QR-код (ID {existing_qr.id})."
+                )
+                return redirect('admin:core_qrcode_changelist')
 
             qr.device = device
             qr.save()
