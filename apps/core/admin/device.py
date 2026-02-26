@@ -11,7 +11,7 @@ from ..utils import export_queryset_to_excel, export_qrcodes_with_images_to_exce
 from ...qr_generator.utils import generate_qr_image_for_device
 from .inlines import QRCodeInline, DeviceHistoryInline
 from ..tasks import generate_qr_codes_for_devices
-from django.db.models import OuterRef, Exists
+from django.db.models import OuterRef, Exists, Subquery
 
 
 # ---------- Кастомная форма с валидацией ----------
@@ -78,9 +78,19 @@ class BaseDeviceAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related('qr_code')
+        qr_for_device = QRCode.objects.filter(device_id=OuterRef('pk')).order_by('-id')
+        return qs.annotate(
+            qr_db_id=Subquery(qr_for_device.values('id')[:1]),
+            qr_db_code=Subquery(qr_for_device.values('code')[:1]),
+        )
 
     def qr_code_link(self, obj):
+        qr_id = getattr(obj, 'qr_db_id', None)
+        qr_code = getattr(obj, 'qr_db_code', None)
+
+        if qr_id and qr_code:
+            return format_html("<b>ID {}</b><br>{}", qr_id, qr_code)
+
         try:
             qr = obj.qr_code
         except QRCode.DoesNotExist:
