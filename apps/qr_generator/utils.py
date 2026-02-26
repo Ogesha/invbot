@@ -1,67 +1,97 @@
+import logging
 import os
-import requests
+
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
-import logging
 
 logger = logging.getLogger(__name__)
-
 BOT_USERNAME = settings.TELEGRAM_BOT_USERNAME
+
+
+def _build_qr_image(data: str, box_size: int = 10, border: int = 2) -> Image.Image:
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=box_size,
+        border=border,
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+    return qr.make_image(fill_color="black", back_color="white").convert("RGB")
+
+
+def _get_font(size: int) -> ImageFont.ImageFont:
+    try:
+        return ImageFont.truetype("DejaVuSans.ttf", size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def _compose_device_qr(qr_img: Image.Image, device, qr_code) -> Image.Image:
+    width, height = qr_img.size
+    canvas_height = height + 100
+    canvas = Image.new("RGB", (width, canvas_height), "white")
+    canvas.paste(qr_img, (0, 0))
+
+    draw = ImageDraw.Draw(canvas)
+    title_font = _get_font(18)
+    body_font = _get_font(14)
+
+    lines = [
+        f"Инв. №: {device.inventory_number}",
+        f"{device.name}",
+        f"Код: {qr_code.code}",
+    ]
+    y = height + 8
+    for i, line in enumerate(lines):
+        font = title_font if i == 0 else body_font
+        text_w, text_h = _text_size(draw, line, font)
+        draw.text(((width - text_w) // 2, y), line, fill="black", font=font)
+        y += text_h + 4
+
+    return canvas
+
 
 def generate_qr_image_for_device(device, target_dir=None):
     qr_code = device.qr_code
     qr_data = f"https://t.me/{BOT_USERNAME}?start={qr_code.code}"
 
     if target_dir is None:
-        target_dir = os.path.join(settings.MEDIA_ROOT, 'qrcodes')
+        target_dir = os.path.join(settings.MEDIA_ROOT, "qrcodes")
     os.makedirs(target_dir, exist_ok=True)
-    filename = f"{device.inventory_number}.png"
-    filepath = os.path.join(target_dir, filename)
 
-    # Пытаемся использовать внешний API с таймаутом
+    filepath = os.path.join(target_dir, f"{device.inventory_number}.png")
+
     try:
-        api_url = "https://api.qrserver.com/v1/create-qr-code/"
-        params = {
-            "data": qr_data,
-            "size": "300x300",
-            "margin": "1",
-            "format": "png"
-        }
-        logger.info(f"Requesting device QR from API: {api_url} with data={qr_data}")
-        response = requests.get(api_url, params=params, timeout=5)  # таймаут 5 сек
-        response.raise_for_status()
-        temp_path = filepath + ".tmp"
-        with open(temp_path, 'wb') as f:
-            f.write(response.content)
-        _add_text_to_qr_image(temp_path, filepath, device, qr_code)
-        os.remove(temp_path)
-        logger.info(f"Device QR saved to {filepath} via API + text overlay")
+        qr_img = _build_qr_image(qr_data)
+        composed = _compose_device_qr(qr_img, device, qr_code)
+        composed.save(filepath, format="PNG")
+        logger.info("Device QR saved to %s", filepath)
         return filepath
-    except Exception as e:
-        logger.error(f"API failed for device QR: {e}, using local fallback")
-        return _generate_device_qr_local(device, filepath)
+    except Exception:
+        logger.exception("Failed generating device QR for device_id=%s", device.id)
+        return None
+
 
 def generate_simple_qr_image_api(code, target_dir=None):
     if target_dir is None:
-        target_dir = os.path.join(settings.MEDIA_ROOT, 'qrcodes')
+        target_dir = os.path.join(settings.MEDIA_ROOT, "qrcodes")
     os.makedirs(target_dir, exist_ok=True)
-    filename = f"{code}.png"
-    filepath = os.path.join(target_dir, filename)
+
+    filepath = os.path.join(target_dir, f"{code}.png")
     qr_data = f"https://t.me/{BOT_USERNAME}?start={code}"
 
     try:
-        api_url = "https://api.qrserver.com/v1/create-qr-code/"
-        params = {"data": qr_data, "size": "300x300", "margin": "1", "format": "png"}
-        logger.info(f"Requesting simple QR from API: {api_url} with data={qr_data}")
-        response = requests.get(api_url, params=params, timeout=5)
-        response.raise_for_status()
-        with open(filepath, 'wb') as f:
-            f.write(response.content)
-        logger.info(f"Simple QR saved to {filepath} via API")
+        qr_img = _build_qr_image(qr_data)
+        qr_img.save(filepath, format="PNG")
+        logger.info("Simple QR saved to %s", filepath)
         return filepath
-    except Exception as e:
-        logger.error(f"API failed for simple QR: {e}, using local fallback")
-        return _generate_simple_qr_local(code, filepath, with_link=True)
-
-# ... остальные функции без изменений ...
+    except Exception:
+        logger.exception("Failed generating simple QR for code=%s", code)
+        return None
