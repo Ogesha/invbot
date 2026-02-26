@@ -288,10 +288,15 @@ class QRCodeAdmin(admin.ModelAdmin):
     activate_qr.short_description = "Активировать выбранные QR-коды"
 
     def regenerate_image(self, request, queryset):
-        for qr in queryset.filter(device__isnull=False):
-            qr.generate_image()
-        self.message_user(request, f"Изображения обновлены для привязанных QR-кодов.")
-    regenerate_image.short_description = "Перегенерировать изображения (только для привязанных)"
+        regenerated = 0
+        for qr in queryset:
+            if qr.device:
+                qr.generate_image()
+            else:
+                qr.generate_simple_image()
+            regenerated += 1
+        self.message_user(request, f"Изображения обновлены для {regenerated} QR-кодов.")
+    regenerate_image.short_description = "Перегенерировать изображения"
 
     def export_to_excel(self, request, queryset):
         fields = ['code', 'device__inventory_number', 'device__name', 'created_at', 'is_active']

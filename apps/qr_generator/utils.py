@@ -6,7 +6,17 @@ from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
-BOT_USERNAME = settings.TELEGRAM_BOT_USERNAME
+
+
+def _build_start_link(code: str) -> str:
+    username = (getattr(settings, "TELEGRAM_BOT_USERNAME", "") or "").strip().lstrip("@")
+    if username:
+        return f"https://t.me/{username}?start={code}"
+
+    logger.warning(
+        "TELEGRAM_BOT_USERNAME is empty. QR fallback uses plain code payload; deep-link scan won't auto-open bot."
+    )
+    return code
 
 
 def _build_qr_image(data: str, box_size: int = 10, border: int = 2) -> Image.Image:
@@ -35,7 +45,7 @@ def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) 
 
 def _compose_device_qr(qr_img: Image.Image, device, qr_code) -> Image.Image:
     width, height = qr_img.size
-    canvas_height = height + 100
+    canvas_height = height + 110
     canvas = Image.new("RGB", (width, canvas_height), "white")
     canvas.paste(qr_img, (0, 0))
 
@@ -46,7 +56,7 @@ def _compose_device_qr(qr_img: Image.Image, device, qr_code) -> Image.Image:
     lines = [
         f"Инв. №: {device.inventory_number}",
         f"{device.name}",
-        f"Код: {qr_code.code}",
+        f"ID SQL: {qr_code.id}",
     ]
     y = height + 8
     for i, line in enumerate(lines):
@@ -60,7 +70,7 @@ def _compose_device_qr(qr_img: Image.Image, device, qr_code) -> Image.Image:
 
 def generate_qr_image_for_device(device, target_dir=None):
     qr_code = device.qr_code
-    qr_data = f"https://t.me/{BOT_USERNAME}?start={qr_code.code}"
+    qr_data = _build_start_link(qr_code.code)
 
     if target_dir is None:
         target_dir = os.path.join(settings.MEDIA_ROOT, "qrcodes")
@@ -85,7 +95,7 @@ def generate_simple_qr_image_api(code, target_dir=None):
     os.makedirs(target_dir, exist_ok=True)
 
     filepath = os.path.join(target_dir, f"{code}.png")
-    qr_data = f"https://t.me/{BOT_USERNAME}?start={code}"
+    qr_data = _build_start_link(code)
 
     try:
         qr_img = _build_qr_image(qr_data)
