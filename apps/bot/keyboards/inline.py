@@ -66,9 +66,6 @@ def employee_edit_keyboard(employee_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🔄 Сменить отдел", callback_data=f"emp_edit_dept_{employee_id}")
     )
     builder.row(
-        InlineKeyboardButton(text="🆔 Telegram ID", callback_data=f"emp_edit_tgid_{employee_id}")
-    )
-    builder.row(
         InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"emp_approve_{employee_id}"),
         InlineKeyboardButton(text="❌ Удалить", callback_data=f"emp_delete_{employee_id}")
     )

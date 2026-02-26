@@ -21,7 +21,6 @@ class AddDepartmentStates(StatesGroup):
 class EditEmployeeStates(StatesGroup):
     waiting_for_new_name = State()
     waiting_for_new_department = State()
-    waiting_for_new_telegram_id = State()
     confirmation = State()
 
 class QrCreateStates(StatesGroup):

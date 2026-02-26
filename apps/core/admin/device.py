@@ -1,3 +1,4 @@
+import os
 from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
@@ -5,13 +6,13 @@ from django.contrib import messages
 from django.shortcuts import redirect
 from django import forms
 from django.core.exceptions import ValidationError
+from django.core.files import File
 from django.db import models
 from ..models import Device, DeviceType, QRCode, Computer, Printer, Employee
 from ..utils import export_queryset_to_excel, export_qrcodes_with_images_to_excel
 from ...qr_generator.utils import generate_qr_image_for_device
 from .inlines import QRCodeInline, DeviceHistoryInline
-from ..tasks import generate_qr_codes_for_devices
-from django.db.models import OuterRef, Exists, Subquery
+from django.db.models import OuterRef, Exists
 
 
 # ---------- Кастомная форма с валидацией ----------
@@ -78,19 +79,9 @@ class BaseDeviceAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        qr_for_device = QRCode.objects.filter(device_id=OuterRef('pk')).order_by('-id')
-        return qs.annotate(
-            qr_db_id=Subquery(qr_for_device.values('id')[:1]),
-            qr_db_code=Subquery(qr_for_device.values('code')[:1]),
-        )
+        return qs.select_related('qr_code')
 
     def qr_code_link(self, obj):
-        qr_id = getattr(obj, 'qr_db_id', None)
-        qr_code = getattr(obj, 'qr_db_code', None)
-
-        if qr_id and qr_code:
-            return format_html("<b>ID {}</b><br>{}", qr_id, qr_code)
-
         try:
             qr = obj.qr_code
         except QRCode.DoesNotExist:
@@ -106,17 +97,25 @@ class BaseDeviceAdmin(admin.ModelAdmin):
     status_display.short_description = "Статус"
 
     def generate_qr_codes(self, request, queryset):
-        device_ids = list(queryset.values_list('id', flat=True))
-        task = generate_qr_codes_for_devices.delay(device_ids)
-        request.session['last_qr_task_id'] = task.id
-        self.message_user(
-            request,
-            f"⏳ Задача на генерацию QR-кодов для {len(device_ids)} устройств запущена. "
-            f"ID задачи: {task.id}. Результат будет доступен в логах.",
-            level=messages.INFO
-        )
+        generated = 0
+        errors = 0
+        for device in queryset:
+            try:
+                qr, _ = QRCode.objects.get_or_create(device=device)
+                filepath = generate_qr_image_for_device(device)
+                if filepath and os.path.exists(filepath):
+                    with open(filepath, 'rb') as f:
+                        qr.image.save(os.path.basename(filepath), File(f), save=False)
+                    qr.save(update_fields=['image'])
+                    generated += 1
+                else:
+                    errors += 1
+            except Exception:
+                errors += 1
+        level = messages.SUCCESS if errors == 0 else messages.WARNING
+        self.message_user(request, f"Сгенерировано QR: {generated}. Ошибок: {errors}.", level=level)
         return redirect(request.get_full_path())
-    generate_qr_codes.short_description = "Сгенерировать QR-коды (асинхронно)"
+    generate_qr_codes.short_description = "Сгенерировать QR-коды"
 
     def print_qr_codes(self, request, queryset):
         self.message_user(request, "Функция печати QR-кодов будет реализована отдельно.", messages.WARNING)
