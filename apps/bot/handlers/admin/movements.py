@@ -122,4 +122,4 @@ async def print_movement_card(callback: CallbackQuery):
     safe_msg = (msg or '')[:180]
     await callback.answer(safe_msg, show_alert=not success)
     if len(msg or '') > 180:
-        await callback.message.answer(msg)
+        await callback.message.answer((msg or '')[:3500])

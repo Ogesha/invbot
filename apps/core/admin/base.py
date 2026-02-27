@@ -6,7 +6,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
 from django import forms
-from ..models import Department, Employee, RegistrationRequest, Admin, ImportAction, MovementCard, QRPrintSettings, MovementCardPrintSettings, Region, AdminScope
+from ..models import Department, Employee, RegistrationRequest, Admin, ImportAction, MovementCard, QRPrintSettings, MovementCardPrintSettings, Region, AdminScope, Device
 from ...bot.notifications import send_message_sync
 from ..utils import export_queryset_to_excel
 from .scope import filter_by_scope, get_default_scope_region
@@ -75,7 +75,6 @@ class DepartmentAdmin(admin.ModelAdmin):
     export_to_excel.short_description = "Экспортировать отделы в Excel"
 
 
-@admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
     list_display = ('id', 'full_name', 'department', 'employee_region', 'telegram_id', 'is_admin', 'is_approved')
     list_filter = ('department__region', 'department', 'is_admin', 'is_approved')
@@ -334,11 +333,29 @@ class RegionAdmin(admin.ModelAdmin):
 
 @admin.register(AdminScope)
 class AdminScopeAdmin(admin.ModelAdmin):
-    list_display = ('id', 'django_user', 'employee', 'can_manage_all_regions', 'can_manage_devices', 'can_manage_employees', 'can_manage_qr', 'can_manage_movements', 'can_print_from_bot')
+    list_display = ('id', 'django_user', 'employee', 'can_manage_all_regions', 'allowed_regions_short', 'can_manage_devices', 'can_manage_employees', 'can_manage_qr', 'can_manage_movements', 'can_print_from_bot')
+    list_filter = ('can_manage_all_regions', 'can_manage_devices', 'can_manage_employees', 'can_manage_qr', 'can_manage_movements', 'can_print_from_bot')
+    search_fields = ('django_user__username', 'employee__full_name')
     filter_horizontal = ('allowed_regions',)
+    fieldsets = (
+        ('Привязка администратора', {'fields': ('django_user', 'employee')}),
+        ('Доступ к регионам', {'fields': ('can_manage_all_regions', 'allowed_regions'), 'description': 'Если включен доступ ко всем регионам — список разрешенных регионов игнорируется.'}),
+        ('Права в системе', {'fields': ('can_manage_devices', 'can_manage_employees', 'can_manage_qr', 'can_manage_movements')}),
+        ('Печать из бота', {'fields': ('can_print_from_bot', 'printer_backend', 'printer_endpoint')}),
+    )
 
     def has_module_permission(self, request):
         return request.user.is_superuser
+
+    def allowed_regions_short(self, obj):
+        if obj.can_manage_all_regions:
+            return 'Все регионы'
+        names = list(obj.allowed_regions.values_list('name', flat=True)[:3])
+        extra = obj.allowed_regions.count() - len(names)
+        tail = f' +{extra}' if extra > 0 else ''
+        return ', '.join(names) + tail if names else '—'
+
+    allowed_regions_short.short_description = 'Регионы'
 
 
 class MovementCardCreateForm(forms.ModelForm):
@@ -359,14 +376,14 @@ class MovementCardCreateForm(forms.ModelForm):
 class MovementCardAdmin(admin.ModelAdmin):
     form = MovementCardCreateForm
     list_display = ('id', 'device_inventory', 'device_name', 'from_department', 'to_department', 'from_responsible', 'to_responsible', 'created_at')
-    autocomplete_fields = ('device', 'to_department_obj', 'to_responsible_obj')
+    autocomplete_fields = ('device', 'to_department_obj')
     search_fields = ('device__inventory_number', 'device__name', 'from_department', 'to_department', 'from_responsible', 'to_responsible')
-    list_filter = ('history__device__department', 'created_at')
+    list_filter = ('device__region', 'to_department_obj', 'created_at')
     actions = ['print_cards']
 
     def get_queryset(self, request):
         qs = super().get_queryset(request).select_related('device__department', 'device__responsible', 'history__device__department')
-        return filter_by_scope(qs, request.user, region_path='device__department__region')
+        return filter_by_scope(qs, request.user, region_path='device__region')
 
     def device_inventory(self, obj):
         dev = obj.device or (obj.history.device if obj.history else None)
@@ -395,6 +412,20 @@ class MovementCardAdmin(admin.ModelAdmin):
         ('История', {'fields': ('history', 'from_department', 'to_department', 'from_responsible', 'to_responsible', 'created_at')}),
     )
     readonly_fields = ('history', 'from_department', 'to_department', 'from_responsible', 'to_responsible', 'created_at')
+
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'device':
+            kwargs['queryset'] = filter_by_scope(Device.objects.select_related('department', 'region').all(), request.user, region_path='region')
+        if db_field.name == 'to_department_obj':
+            kwargs['queryset'] = filter_by_scope(Department.objects.all(), request.user, region_path='region')
+        if db_field.name == 'to_responsible_obj':
+            dept_id = request.POST.get('to_department_obj') or request.GET.get('to_department_obj')
+            qs = filter_by_scope(Employee.objects.select_related('department').all(), request.user, region_path='department__region')
+            if dept_id and str(dept_id).isdigit():
+                qs = qs.filter(department_id=int(dept_id))
+            kwargs['queryset'] = qs.order_by('full_name')
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def save_model(self, request, obj, form, change):
         from apps.core.models import DeviceHistory

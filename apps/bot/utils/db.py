@@ -471,6 +471,7 @@ def create_device_with_qr(code, name, inventory_number, device_type_id, departme
 @sync_to_async
 def send_movement_card_to_print(card_id, admin_telegram_id):
     import requests
+    from requests.exceptions import SSLError
     admin_emp = Employee.objects.filter(telegram_id=admin_telegram_id, is_admin=True, is_approved=True).first()
     if not admin_emp:
         return False, 'Администратор не найден'
@@ -485,9 +486,18 @@ def send_movement_card_to_print(card_id, admin_telegram_id):
         endpoint = scope.printer_endpoint
         if 'movement-card/print' not in endpoint:
             endpoint = endpoint.rstrip('/') + '/api/movement-card/print/'
-        response = requests.post(endpoint, json={'movement_card_id': card_id}, timeout=5)
+
+        payload = {'movement_card_id': card_id}
+        try:
+            response = requests.post(endpoint, json=payload, timeout=7)
+        except SSLError:
+            # Локальные принт-серверы часто работают с self-signed сертификатами.
+            # Повторяем запрос без валидации SSL только для внутреннего endpoint.
+            requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
+            response = requests.post(endpoint, json=payload, timeout=7, verify=False)
+
         if response.status_code >= 400:
-            return False, f'Ошибка принтера: HTTP {response.status_code} ({endpoint})'
+            return False, f'Ошибка принтера: HTTP {response.status_code}'
         return True, 'Карточка отправлена на печать'
     except Exception as exc:
         return False, f'Ошибка отправки на печать: {exc}'

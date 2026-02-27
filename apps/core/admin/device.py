@@ -80,7 +80,7 @@ class BaseDeviceAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request).select_related('qr_code', 'department')
-        return filter_by_scope(qs, request.user, region_path='department__region')
+        return filter_by_scope(qs, request.user, region_path='region')
 
     def qr_code_link(self, obj):
         try:
@@ -295,7 +295,7 @@ class QRCodeAdmin(admin.ModelAdmin):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == 'device':
             subquery = QRCode.objects.filter(device=OuterRef('pk'))
-            free_devices = filter_by_scope(Device.objects.annotate(has_qr=Exists(subquery)).filter(has_qr=False), request.user, region_path='department__region')
+            free_devices = filter_by_scope(Device.objects.annotate(has_qr=Exists(subquery)).filter(has_qr=False), request.user, region_path='region')
 
             obj_id = request.resolver_match.kwargs.get('object_id') if request.resolver_match else None
             if obj_id:
