@@ -5,7 +5,7 @@ from django.contrib import messages
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
-from ..models import Department, Employee, RegistrationRequest, Admin, ImportAction, MovementCard, QRPrintSettings
+from ..models import Department, Employee, RegistrationRequest, Admin, ImportAction, MovementCard, QRPrintSettings, MovementCardPrintSettings
 from ...bot.notifications import send_message_sync
 from ..utils import export_queryset_to_excel
 
@@ -253,6 +253,19 @@ class QRPrintSettingsAdmin(admin.ModelAdmin):
         return False
 
 
+
+
+@admin.register(MovementCardPrintSettings)
+class MovementCardPrintSettingsAdmin(admin.ModelAdmin):
+    list_display = ('id', 'card_width_mm', 'card_height_mm', 'text_size_px', 'title_size_px')
+
+    def has_add_permission(self, request):
+        return not MovementCardPrintSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(MovementCard)
 class MovementCardAdmin(admin.ModelAdmin):
     list_display = ('id', 'device_inventory', 'device_name', 'from_department', 'to_department', 'from_responsible', 'to_responsible', 'created_at')
@@ -270,27 +283,19 @@ class MovementCardAdmin(admin.ModelAdmin):
         return obj.history.device.name
 
     def from_department(self, obj):
-        previous = (
-            obj.history.device.history
-            .filter(field='department', timestamp__lte=obj.history.timestamp)
-            .exclude(pk=obj.history.pk)
-            .order_by('-timestamp')
-            .first()
-        )
-        return previous.new_value if previous else (obj.history.device.department.name if obj.history.device.department else '—')
+        return obj.from_department or '—'
 
     def to_department(self, obj):
-        dep_change = obj.history.device.history.filter(field='department', timestamp__lte=obj.history.timestamp).order_by('-timestamp').first()
-        return dep_change.new_value if dep_change else (obj.history.device.department.name if obj.history.device.department else '—')
+        return obj.to_department or '—'
 
     def from_responsible(self, obj):
-        return obj.history.old_value or '—'
+        return obj.from_responsible or '—'
 
     def to_responsible(self, obj):
-        return obj.history.new_value or '—'
+        return obj.to_responsible or '—'
 
     def print_cards(self, request, queryset):
-        settings_obj, _ = QRPrintSettings.objects.get_or_create(pk=1)
+        settings_obj, _ = MovementCardPrintSettings.objects.get_or_create(pk=1)
         items = []
         for card in queryset.select_related('history__device__department', 'history__device__responsible'):
             device = card.history.device
@@ -301,8 +306,8 @@ class MovementCardAdmin(admin.ModelAdmin):
                 'device': device,
                 'from_department': dep_from,
                 'to_department': dep_to,
-                'from_responsible': card.history.old_value or '—',
-                'to_responsible': card.history.new_value or '—',
+                'from_responsible': card.from_responsible or '—',
+                'to_responsible': card.to_responsible or '—',
             })
 
         return render(
@@ -312,7 +317,7 @@ class MovementCardAdmin(admin.ModelAdmin):
                 'title': 'Печать карточек перемещения',
                 'items': items,
                 'print_settings': settings_obj,
-                'settings_url': reverse('admin:core_qrprintsettings_change', args=[settings_obj.id]),
+                'settings_url': reverse('admin:core_movementcardprintsettings_change', args=[settings_obj.id]),
             },
         )
 

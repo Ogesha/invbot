@@ -249,6 +249,20 @@ class QRPrintSettings(models.Model):
         return "Настройки печати QR"
 
 
+class MovementCardPrintSettings(models.Model):
+    card_width_mm = models.PositiveIntegerField("Ширина карточки (мм)", default=90)
+    card_height_mm = models.PositiveIntegerField("Высота карточки (мм)", default=70)
+    text_size_px = models.PositiveIntegerField("Размер текста (px)", default=13)
+    title_size_px = models.PositiveIntegerField("Размер заголовка (px)", default=16)
+
+    class Meta:
+        verbose_name = "Настройки печати карточек перемещения"
+        verbose_name_plural = "Настройки печати карточек перемещения"
+
+    def __str__(self):
+        return "Настройки печати карточек перемещения"
+
+
 class MovementCard(models.Model):
     history = models.OneToOneField(
         DeviceHistory,
@@ -256,6 +270,10 @@ class MovementCard(models.Model):
         related_name='movement_card',
         verbose_name="История перемещения",
     )
+    from_department = models.CharField("Отдел (откуда)", max_length=150, blank=True, default='—')
+    to_department = models.CharField("Отдел (куда)", max_length=150, blank=True, default='—')
+    from_responsible = models.CharField("Ответственный (откуда)", max_length=200, blank=True, default='—')
+    to_responsible = models.CharField("Ответственный (куда)", max_length=200, blank=True, default='—')
     created_at = models.DateTimeField("Дата создания", auto_now_add=True)
 
     class Meta:

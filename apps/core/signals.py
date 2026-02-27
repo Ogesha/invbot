@@ -32,25 +32,34 @@ def device_pre_save_handler(sender, instance, **kwargs):
     if old.responsible != instance.responsible:
         old_resp_str = str(old.responsible) if old.responsible else '—'
         new_resp_str = str(instance.responsible) if instance.responsible else '—'
+        old_dept_str = old.department.name if old.department else '—'
+        new_dept_str = instance.department.name if instance.department else '—'
         history = DeviceHistory.objects.create(
             device=instance,
             field='responsible',
             old_value=old_resp_str,
             new_value=new_resp_str
         )
-        MovementCard.objects.get_or_create(history=history)
+        MovementCard.objects.update_or_create(
+            history=history,
+            defaults={
+                'from_department': old_dept_str,
+                'to_department': new_dept_str,
+                'from_responsible': old_resp_str,
+                'to_responsible': new_resp_str,
+            },
+        )
         changes.append(f"Ответственный: {old_resp_str} → {new_resp_str}")
 
     if old.department != instance.department:
         old_dept_str = old.department.name if old.department else '—'
         new_dept_str = instance.department.name if instance.department else '—'
-        history = DeviceHistory.objects.create(
+        DeviceHistory.objects.create(
             device=instance,
             field='department',
             old_value=old_dept_str,
             new_value=new_dept_str
         )
-        MovementCard.objects.get_or_create(history=history)
         changes.append(f"Отдел: {old_dept_str} → {new_dept_str}")
 
     if old.status != instance.status:
