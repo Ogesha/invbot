@@ -5,6 +5,7 @@ from django.contrib import messages
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
+from django import forms
 from ..models import Department, Employee, RegistrationRequest, Admin, ImportAction, MovementCard, QRPrintSettings, MovementCardPrintSettings, Region, AdminScope
 from ...bot.notifications import send_message_sync
 from ..utils import export_queryset_to_excel
@@ -24,6 +25,18 @@ class EmployeeInline(admin.TabularInline):
 
     def has_add_permission(self, request, obj=None):
         return False
+
+
+
+
+class DepartmentLookupAdmin(admin.ModelAdmin):
+    search_fields = ('name',)
+
+    def get_model_perms(self, request):
+        return {}
+
+
+admin.site.register(Department, DepartmentLookupAdmin)
 
 
 class DepartmentAdmin(admin.ModelAdmin):
@@ -79,6 +92,19 @@ class EmployeeAdmin(admin.ModelAdmin):
 
     def employee_region(self, obj):
         return obj.department.region.name if obj.department and obj.department.region else '—'
+
+
+    def get_list_editable(self, request):
+        if request.user.is_superuser:
+            return self.list_editable
+        return ()
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not request.user.is_superuser:
+            actions.pop('make_admin', None)
+            actions.pop('remove_admin', None)
+        return actions
 
     def approve_selected(self, request, queryset):
         queryset.update(is_approved=True)
@@ -286,29 +312,53 @@ class RegionAdmin(admin.ModelAdmin):
     list_display = ('id', 'name')
     search_fields = ('name',)
 
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
 
 @admin.register(AdminScope)
 class AdminScopeAdmin(admin.ModelAdmin):
     list_display = ('id', 'django_user', 'employee', 'can_manage_all_regions', 'can_manage_devices', 'can_manage_employees', 'can_manage_qr', 'can_manage_movements', 'can_print_from_bot')
     filter_horizontal = ('allowed_regions',)
 
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+
+class MovementCardCreateForm(forms.ModelForm):
+    class Meta:
+        model = MovementCard
+        fields = '__all__'
+
+    def clean(self):
+        cleaned = super().clean()
+        dept = cleaned.get('to_department_obj')
+        resp = cleaned.get('to_responsible_obj')
+        if resp and dept and resp.department_id != dept.id:
+            raise forms.ValidationError('Сотрудник должен принадлежать выбранному отделу.')
+        return cleaned
+
 
 @admin.register(MovementCard)
 class MovementCardAdmin(admin.ModelAdmin):
+    form = MovementCardCreateForm
     list_display = ('id', 'device_inventory', 'device_name', 'from_department', 'to_department', 'from_responsible', 'to_responsible', 'created_at')
+    autocomplete_fields = ('device', 'to_department_obj', 'to_responsible_obj')
+    search_fields = ('device__inventory_number', 'device__name', 'from_department', 'to_department', 'from_responsible', 'to_responsible')
     list_filter = ('history__device__department', 'created_at')
-    search_fields = ('history__device__inventory_number', 'history__device__name', 'history__old_value', 'history__new_value')
     actions = ['print_cards']
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request).select_related('history__device__department', 'history__device__responsible')
-        return filter_by_scope(qs, request.user, region_path='history__device__department__region')
+        qs = super().get_queryset(request).select_related('device__department', 'device__responsible', 'history__device__department')
+        return filter_by_scope(qs, request.user, region_path='device__department__region')
 
     def device_inventory(self, obj):
-        return obj.history.device.inventory_number
+        dev = obj.device or (obj.history.device if obj.history else None)
+        return dev.inventory_number if dev else '—'
 
     def device_name(self, obj):
-        return obj.history.device.name
+        dev = obj.device or (obj.history.device if obj.history else None)
+        return dev.name if dev else '—'
 
     def from_department(self, obj):
         return obj.from_department or '—'
@@ -322,11 +372,48 @@ class MovementCardAdmin(admin.ModelAdmin):
     def to_responsible(self, obj):
         return obj.to_responsible or '—'
 
+
+
+    fieldsets = (
+        (None, {'fields': ('device', 'to_department_obj', 'to_responsible_obj')}),
+        ('История', {'fields': ('history', 'from_department', 'to_department', 'from_responsible', 'to_responsible', 'created_at')}),
+    )
+    readonly_fields = ('history', 'from_department', 'to_department', 'from_responsible', 'to_responsible', 'created_at')
+
+    def save_model(self, request, obj, form, change):
+        from apps.core.models import DeviceHistory
+        if not change and obj.device and obj.to_responsible_obj:
+            old_dept = obj.device.department
+            old_resp = obj.device.responsible
+
+            new_dept = obj.to_department_obj or obj.to_responsible_obj.department
+            obj.from_department = old_dept.name if old_dept else '—'
+            obj.from_responsible = old_resp.full_name if old_resp else '—'
+            obj.to_department = new_dept.name if new_dept else '—'
+            obj.to_responsible = obj.to_responsible_obj.full_name if obj.to_responsible_obj else '—'
+
+            history = DeviceHistory.objects.create(
+                device=obj.device,
+                field='responsible',
+                old_value=obj.from_responsible,
+                new_value=obj.to_responsible,
+            )
+            obj.history = history
+
+            device_region = new_dept.region if new_dept else obj.device.region
+            from apps.core.models import Device
+            Device.objects.filter(pk=obj.device_id).update(
+                responsible=obj.to_responsible_obj,
+                department=new_dept,
+                region=device_region,
+            )
+
+        super().save_model(request, obj, form, change)
     def print_cards(self, request, queryset):
         settings_obj, _ = MovementCardPrintSettings.objects.get_or_create(pk=1)
         items = []
-        for card in queryset.select_related('history__device__department', 'history__device__responsible'):
-            device = card.history.device
+        for card in queryset.select_related('device__department', 'device__responsible', 'history__device__department'):
+            device = card.device or (card.history.device if card.history else None)
             dep_from = self.from_department(card)
             dep_to = self.to_department(card)
             items.append({

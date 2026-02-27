@@ -46,6 +46,9 @@ def device_pre_save_handler(sender, instance, **kwargs):
         MovementCard.objects.update_or_create(
             history=history,
             defaults={
+                'device': instance,
+                'to_department_obj': instance.department,
+                'to_responsible_obj': instance.responsible,
                 'from_department': old_dept_str,
                 'to_department': new_dept_str,
                 'from_responsible': old_resp_str,

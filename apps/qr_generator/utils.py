@@ -29,7 +29,19 @@ def _build_qr_image(data: str, box_size: int = 10, border: int = 2) -> Image.Ima
         border=border,
     )
     qr.add_data(data)
-    qr.make(fit=True)
+    try:
+        qr.make(fit=True)
+    except RecursionError:
+        logger.exception("RecursionError while building QR; retrying with simplified payload")
+        qr = qrcode.QRCode(
+            version=None,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=box_size,
+            border=border,
+        )
+        safe_data = str(data)[:256]
+        qr.add_data(safe_data)
+        qr.make(fit=True)
     return qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
 

@@ -130,7 +130,7 @@ async def approve_employee(callback: CallbackQuery):
     await back_to_main_menu(callback, callback.from_user.id)
 
 # ---------- Удаление сотрудника ----------
-@router.callback_query(F.data.startswith("emp_delete_"))
+@router.callback_query(F.data.regexp(r"^emp_delete_\d+$"))
 async def delete_employee_confirm(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Нет прав", show_alert=True)

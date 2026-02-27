@@ -130,7 +130,7 @@ def generate_qr_api(request):
     back_color = request.GET.get('back_color', 'white')
 
     qr = qrcode.QRCode(
-        version=1,
+        version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_L,
         box_size=10,
         border=4,

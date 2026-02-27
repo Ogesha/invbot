@@ -38,7 +38,7 @@ async def departments_menu(callback: CallbackQuery):
     await callback.message.edit_text("🏢 Выберите отдел:", reply_markup=kb)
     await callback.answer()
 
-@router.callback_query(F.data.startswith("dept_"))
+@router.callback_query(F.data.regexp(r"^dept_\d+$"))
 async def show_department_employees(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Нет прав", show_alert=True)

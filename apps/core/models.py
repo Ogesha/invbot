@@ -293,7 +293,12 @@ class MovementCard(models.Model):
         on_delete=models.CASCADE,
         related_name='movement_card',
         verbose_name="История перемещения",
+        null=True,
+        blank=True,
     )
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='movement_cards', verbose_name='Техника', null=True, blank=True)
+    to_department_obj = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True, related_name='movement_cards_to', verbose_name='Отдел (куда)')
+    to_responsible_obj = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name='movement_cards_to', verbose_name='Ответственный (куда)')
     from_department = models.CharField("Отдел (откуда)", max_length=150, blank=True, default='—')
     to_department = models.CharField("Отдел (куда)", max_length=150, blank=True, default='—')
     from_responsible = models.CharField("Ответственный (откуда)", max_length=200, blank=True, default='—')
@@ -306,11 +311,8 @@ class MovementCard(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"Карточка перемещения #{self.id} ({self.history.device.inventory_number})"
-
-    @property
-    def device(self):
-        return self.history.device
+        inv = self.device.inventory_number if self.device else (self.history.device.inventory_number if self.history else '—')
+        return f"Карточка перемещения #{self.id} ({inv})"
 
 
 class AdminScope(models.Model):
