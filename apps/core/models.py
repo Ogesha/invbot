@@ -175,6 +175,9 @@ class QRCode(models.Model):
         if not self.code:
             self.code = str(uuid.uuid4())[:8]
 
+        update_fields = kwargs.get('update_fields')
+        image_only_update = bool(update_fields) and set(update_fields) <= {'image'}
+
         # Проверяем, изменилось ли устройство (для существующей записи)
         device_changed = False
         if self.pk:
@@ -185,6 +188,9 @@ class QRCode(models.Model):
                 pass
 
         super().save(*args, **kwargs)
+
+        if image_only_update:
+            return
 
         # Генерируем изображение, если:
         # - есть устройство и (нет изображения ИЛИ устройство изменилось)
@@ -202,7 +208,7 @@ class QRCode(models.Model):
 
         content = build_qr_png_content(_build_start_link(self.code))
         self.image.save(f"{self.device.inventory_number}.png", content, save=False)
-        self.save(update_fields=['image'])
+        super().save(update_fields=['image'])
 
     def generate_simple_image(self):
         """Генерирует изображение QR только с кодом."""
@@ -210,7 +216,7 @@ class QRCode(models.Model):
 
         content = build_qr_png_content(_build_start_link(self.code))
         self.image.save(f"{self.code}.png", content, save=False)
-        self.save(update_fields=['image'])
+        super().save(update_fields=['image'])
 
     def __str__(self):
         if self.device:

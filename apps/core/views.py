@@ -372,3 +372,30 @@ def import_devices_from_excel(request):
         return JsonResponse({'status': 'ok', 'results': results})
 
     return render(request, 'admin/import_excel.html')
+
+@csrf_exempt
+def movement_card_print_endpoint(request):
+    if request.method != 'POST':
+        return JsonResponse({'detail': 'Method not allowed'}, status=405)
+
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except Exception:
+        payload = {}
+
+    card_id = payload.get('movement_card_id')
+    if not card_id:
+        return JsonResponse({'detail': 'movement_card_id is required'}, status=400)
+
+    from .models import MovementCard
+    card = MovementCard.objects.select_related('device').filter(id=card_id).first()
+    if not card:
+        return JsonResponse({'detail': 'movement card not found'}, status=404)
+
+    # Заглушка интеграции печати: endpoint подтверждает прием карточки.
+    return JsonResponse({
+        'status': 'accepted',
+        'movement_card_id': card.id,
+        'device_inventory': card.device.inventory_number if card.device else None,
+    })
