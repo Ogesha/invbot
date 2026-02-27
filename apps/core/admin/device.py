@@ -8,7 +8,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.core.files import File
 from django.db import models
-from ..models import Device, DeviceType, QRCode, Computer, Printer, Employee, QRPrintSettings
+from ..models import Device, DeviceType, QRCode, Computer, Printer, Employee, QRPrintSettings, Department
 from ..utils import export_queryset_to_excel, export_qrcodes_with_images_to_excel
 from ...qr_generator.utils import generate_qr_image_for_device
 from .inlines import QRCodeInline, DeviceHistoryInline
@@ -203,6 +203,7 @@ class BaseDeviceAdmin(admin.ModelAdmin):
                 department_id = obj.department.id
                 print(f"GET department_id from obj = {department_id}")
 
+            form.base_fields['department'].queryset = filter_by_scope(Department.objects.all(), request.user, region_path='region').order_by('name')
             base_qs = filter_by_scope(Employee.objects.filter(is_approved=True), request.user, region_path='department__region')
             if department_id:
                 form.base_fields['responsible'].queryset = base_qs.filter(
@@ -214,9 +215,20 @@ class BaseDeviceAdmin(admin.ModelAdmin):
             print(f"Ошибка в get_form: {e}")
             import traceback
             traceback.print_exc()
+            form.base_fields['department'].queryset = filter_by_scope(Department.objects.all(), request.user, region_path='region').order_by('name')
             form.base_fields['responsible'].queryset = filter_by_scope(Employee.objects.filter(is_approved=True), request.user, region_path='department__region').order_by('full_name')
         return form
 
+
+    def save_model(self, request, obj, form, change):
+        from .scope import get_default_scope_region
+        if obj.department and obj.department.region:
+            obj.region = obj.department.region
+        elif not obj.region:
+            default_region = get_default_scope_region(request.user)
+            if default_region:
+                obj.region = default_region
+        super().save_model(request, obj, form, change)
     def get_actions(self, request):
         actions = super().get_actions(request)
         print(f"get_actions для {self.__class__.__name__}: {list(actions.keys())}")
@@ -278,7 +290,7 @@ class QRCodeAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request).select_related('device__department')
-        return filter_by_scope(qs, request.user, region_path='device__department__region')
+        return filter_by_scope(qs, request.user, region_path='device__region')
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == 'device':
@@ -292,7 +304,7 @@ class QRCodeAdmin(admin.ModelAdmin):
                     kwargs['queryset'] = filter_by_scope(
                         Device.objects.annotate(has_qr=Exists(subquery)).filter(models.Q(has_qr=False) | models.Q(pk=qr.device_id)),
                         request.user,
-                        region_path='department__region'
+                        region_path='region'
                     ).order_by('inventory_number')
                 except QRCode.DoesNotExist:
                     kwargs['queryset'] = free_devices.order_by('inventory_number')

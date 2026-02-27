@@ -51,11 +51,11 @@ def get_employee_devices(employee):
 
 @sync_to_async
 def get_all_devices_filtered(department_id=None, device_type_id=None, status=None, admin_telegram_id=None):
-    qs = Device.objects.select_related('department', 'device_type', 'responsible').all()
+    qs = Device.objects.select_related('department', 'region', 'device_type', 'responsible').all()
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(department__region_id__in=region_ids)
+            qs = qs.filter(region_id__in=region_ids)
     if department_id and department_id != 'all':
         qs = qs.filter(department_id=department_id)
     if device_type_id and device_type_id != 'all':
@@ -120,7 +120,7 @@ def get_all_employees_data(admin_telegram_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(department__region_id__in=region_ids)
+            qs = qs.filter(region_id__in=region_ids)
     return list(qs.order_by('full_name').values('id', 'full_name', 'is_approved', 'department__name'))
 
 @sync_to_async
@@ -131,7 +131,7 @@ def get_all_employees_with_dept(admin_telegram_id=None, department_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(department__region_id__in=region_ids)
+            qs = qs.filter(region_id__in=region_ids)
     return list(qs.order_by('full_name'))
 
 @sync_to_async
@@ -149,7 +149,7 @@ def get_employees_by_department(department_id, admin_telegram_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(department__region_id__in=region_ids)
+            qs = qs.filter(region_id__in=region_ids)
     return list(qs.order_by('full_name'))
 
 @sync_to_async
@@ -241,7 +241,7 @@ def assign_qr_to_device(qr_id, device_id, admin_telegram_id=None):
         device = Device.objects.get(id=device_id)
         if admin_telegram_id is not None:
             region_ids = _region_filter_for_admin(admin_telegram_id)
-            if region_ids is not None and device.department_id and device.department.region_id not in region_ids:
+            if region_ids is not None and device.region_id and device.region_id not in region_ids:
                 return False, 'Нет доступа к региону этой техники'
 
         # Разрешаем привязку только к свободной технике (без QR)
@@ -267,7 +267,7 @@ def get_all_devices(admin_telegram_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(department__region_id__in=region_ids)
+            qs = qs.filter(region_id__in=region_ids)
     return list(qs.order_by('inventory_number'))
 
 @sync_to_async
@@ -317,11 +317,11 @@ def change_device_responsible(device_id, new_responsible_id, admin_telegram_id=N
 @sync_to_async
 def get_devices_without_qr(admin_telegram_id=None):
     from apps.core.models import Device
-    qs = Device.objects.filter(qr_code__isnull=True).select_related('department', 'responsible')
+    qs = Device.objects.filter(qr_code__isnull=True).select_related('department', 'region', 'responsible')
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(department__region_id__in=region_ids)
+            qs = qs.filter(region_id__in=region_ids)
     return list(qs.order_by('inventory_number'))
 
 @sync_to_async
@@ -452,11 +452,16 @@ def reject_request(request_id, comment=""):
 
 @sync_to_async
 def create_device_with_qr(code, name, inventory_number, device_type_id, department_id=None, responsible_id=None):
+    region_id = None
+    if department_id:
+        dept = Department.objects.filter(id=department_id).select_related('region').first()
+        region_id = dept.region_id if dept else None
     device = Device.objects.create(
         name=name,
         inventory_number=inventory_number,
         device_type_id=device_type_id,
         department_id=department_id,
+        region_id=region_id,
         responsible_id=responsible_id,
         status='in_use'
     )
@@ -477,9 +482,12 @@ def send_movement_card_to_print(card_id, admin_telegram_id):
         return False, 'Не настроен endpoint принтера'
 
     try:
-        response = requests.post(scope.printer_endpoint, json={'movement_card_id': card_id}, timeout=5)
+        endpoint = scope.printer_endpoint
+        if 'movement-card/print' not in endpoint:
+            endpoint = endpoint.rstrip('/') + '/api/movement-card/print/'
+        response = requests.post(endpoint, json={'movement_card_id': card_id}, timeout=5)
         if response.status_code >= 400:
-            return False, f'Ошибка принтера: HTTP {response.status_code}'
+            return False, f'Ошибка принтера: HTTP {response.status_code} ({endpoint})'
         return True, 'Карточка отправлена на печать'
     except Exception as exc:
         return False, f'Ошибка отправки на печать: {exc}'

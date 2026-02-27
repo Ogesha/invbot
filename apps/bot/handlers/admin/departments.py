@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from asgiref.sync import sync_to_async
+from apps.core.models import AdminScope
 from aiogram.exceptions import TelegramBadRequest
 
 from ...utils.db import is_admin, get_all_departments, get_employees_by_department
@@ -19,9 +20,15 @@ def get_department_by_id(dept_id):
         return None
 
 @sync_to_async
-def create_department(name, description):
-    from apps.core.models import Department
-    return Department.objects.create(name=name, description=description)
+def create_department(name, description, admin_telegram_id):
+    from apps.core.models import Department, Employee
+    admin_emp = Employee.objects.filter(telegram_id=admin_telegram_id, is_admin=True, is_approved=True).first()
+    region = None
+    if admin_emp:
+        scope = AdminScope.objects.filter(employee=admin_emp).prefetch_related('allowed_regions').first()
+        if scope and not scope.can_manage_all_regions:
+            region = scope.allowed_regions.first()
+    return Department.objects.create(name=name, description=description, region=region)
 
 @sync_to_async
 def department_exists(name):
@@ -124,7 +131,7 @@ async def confirm_create_dept(callback: CallbackQuery, state: FSMContext):
         await state.clear()
         await back_to_main_menu(callback, callback.from_user.id)
         return
-    await create_department(name, desc)
+    await create_department(name, desc, callback.from_user.id)
     await callback.message.edit_text(f"✅ Отдел «{name}» создан.")
     await state.clear()
     await back_to_main_menu(callback, callback.from_user.id)

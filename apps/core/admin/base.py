@@ -9,7 +9,7 @@ from django import forms
 from ..models import Department, Employee, RegistrationRequest, Admin, ImportAction, MovementCard, QRPrintSettings, MovementCardPrintSettings, Region, AdminScope
 from ...bot.notifications import send_message_sync
 from ..utils import export_queryset_to_excel
-from .scope import filter_by_scope
+from .scope import filter_by_scope, get_default_scope_region
 
 admin.site.unregister(Group)
 
@@ -32,6 +32,10 @@ class EmployeeInline(admin.TabularInline):
 class DepartmentLookupAdmin(admin.ModelAdmin):
     search_fields = ('name',)
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return filter_by_scope(qs, request.user, region_path='region')
+
     def get_model_perms(self, request):
         return {}
 
@@ -50,6 +54,13 @@ class DepartmentAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         return filter_by_scope(qs, request.user)
 
+
+    def save_model(self, request, obj, form, change):
+        if not obj.region:
+            default_region = get_default_scope_region(request.user)
+            if default_region:
+                obj.region = default_region
+        super().save_model(request, obj, form, change)
     def employee_count(self, obj):
         count = obj.employees.count()
         # Используем правильный URL для прокси-модели EmployeeProxy в приложении staff
@@ -106,6 +117,11 @@ class EmployeeAdmin(admin.ModelAdmin):
             actions.pop('remove_admin', None)
         return actions
 
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'department':
+            kwargs['queryset'] = filter_by_scope(Department.objects.all(), request.user, region_path='region')
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
     def approve_selected(self, request, queryset):
         queryset.update(is_approved=True)
         self.message_user(request, f"Отмеченные сотрудники подтверждены.")

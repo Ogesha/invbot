@@ -119,4 +119,7 @@ async def print_movement_card(callback: CallbackQuery):
 
     card_id = int(callback.data.split("_")[-1])
     success, msg = await send_movement_card_to_print(card_id, callback.from_user.id)
-    await callback.answer(msg, show_alert=not success)
+    safe_msg = (msg or '')[:180]
+    await callback.answer(safe_msg, show_alert=not success)
+    if len(msg or '') > 180:
+        await callback.message.answer(msg)
