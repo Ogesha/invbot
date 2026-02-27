@@ -1,6 +1,4 @@
-import os
 from asgiref.sync import sync_to_async
-from django.core.files import File
 from apps.core.models import Employee, Device, QRCode, RegistrationRequest, DeviceType, Department
 
 # ---------- Базовые функции (используются в start.py и др.) ----------
@@ -172,14 +170,9 @@ def get_employee_devices(employee_id):
 # ---------- Функции для QR-кодов ----------
 @sync_to_async
 def create_qr_code():
-    from apps.qr_generator.utils import generate_simple_qr_image_api
-
     qr = QRCode.objects.create(is_active=True)
-    filepath = generate_simple_qr_image_api(qr.code)
-    if filepath and os.path.exists(filepath):
-        with open(filepath, 'rb') as f:
-            qr.image.save(os.path.basename(filepath), File(f), save=False)
-        qr.save(update_fields=['image'])
+    qr.generate_simple_image()
+    qr.refresh_from_db(fields=['image'])
     return qr
 
 @sync_to_async
@@ -227,6 +220,39 @@ def assign_qr_to_device(qr_id, device_id):
 def get_all_devices():
     from apps.core.models import Device
     return list(Device.objects.select_related('department', 'responsible').all().order_by('inventory_number'))
+
+@sync_to_async
+def get_device_data(device_id):
+    try:
+        return Device.objects.select_related('department', 'responsible').get(id=device_id)
+    except Device.DoesNotExist:
+        return None
+
+@sync_to_async
+def change_device_responsible(device_id, new_responsible_id):
+    try:
+        device = Device.objects.select_related('department', 'responsible').get(id=device_id)
+        employee = Employee.objects.select_related('department').get(id=new_responsible_id)
+    except (Device.DoesNotExist, Employee.DoesNotExist):
+        return False, 'Устройство или сотрудник не найдены', None
+
+    old_responsible = device.responsible
+    old_department = device.department
+
+    device.responsible = employee
+    if employee.department and employee.department != device.department:
+        device.department = employee.department
+    device.save()
+
+    device.refresh_from_db(fields=['department', 'responsible'])
+    movement_info = {
+        'device': device,
+        'from_department': old_department.name if old_department else '—',
+        'to_department': device.department.name if device.department else '—',
+        'from_responsible': old_responsible.full_name if old_responsible else '—',
+        'to_responsible': device.responsible.full_name if device.responsible else '—',
+    }
+    return True, 'Ответственный успешно изменён', movement_info
 
 @sync_to_async
 def get_devices_without_qr():
@@ -367,7 +393,7 @@ def create_device_with_qr(code, name, inventory_number, device_type_id, departme
         device_type_id=device_type_id,
         department_id=department_id,
         responsible_id=responsible_id,
-        status=True
+        status='in_use'
     )
     QRCode.objects.create(device=device, code=code, is_active=True)
     return device

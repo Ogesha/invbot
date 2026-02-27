@@ -1,9 +1,11 @@
+import io
 import logging
 import os
 
 import qrcode
 from PIL import Image
 from django.conf import settings
+from django.core.files.base import ContentFile
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ def _build_start_link(code: str) -> str:
 
 def _build_qr_image(data: str, box_size: int = 10, border: int = 2) -> Image.Image:
     qr = qrcode.QRCode(
-        version=1,
+        version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_M,
         box_size=box_size,
         border=border,
@@ -29,6 +31,13 @@ def _build_qr_image(data: str, box_size: int = 10, border: int = 2) -> Image.Ima
     qr.add_data(data)
     qr.make(fit=True)
     return qr.make_image(fill_color="black", back_color="white").convert("RGB")
+
+
+def build_qr_png_content(data: str) -> ContentFile:
+    qr_img = _build_qr_image(data)
+    buffer = io.BytesIO()
+    qr_img.save(buffer, format="PNG")
+    return ContentFile(buffer.getvalue())
 
 
 def generate_qr_image_for_device(device, target_dir=None):

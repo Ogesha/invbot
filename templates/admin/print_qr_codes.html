@@ -3,9 +3,18 @@
 {% block extrastyle %}
 <style>
   .sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
-  .card { border: 1px dashed #bbb; padding: 10px; text-align: center; page-break-inside: avoid; background: #fff; }
-  .qr-img { width: 200px; height: auto; margin: 0 auto 8px; display: block; }
-  .meta { font-size: 13px; line-height: 1.3; }
+  .card {
+    border: 1px dashed #bbb;
+    width: {{ print_settings.card_width_mm }}mm;
+    min-height: {{ print_settings.card_height_mm }}mm;
+    padding: 8px;
+    text-align: center;
+    page-break-inside: avoid;
+    background: #fff;
+    box-sizing: border-box;
+  }
+  .qr-img { width: {{ print_settings.qr_size_px }}px; height: auto; margin: 0 auto 8px; display: block; }
+  .meta { font-size: {{ print_settings.text_size_px }}px; line-height: 1.3; }
   @media print {
     .no-print { display: none !important; }
     body { background: #fff; }
@@ -15,24 +24,36 @@
 {% endblock %}
 
 {% block content %}
-<div class="no-print" style="margin-bottom:12px;">
+<div class="no-print" style="margin-bottom:12px;display:flex;gap:8px;">
   <button onclick="window.print()" class="button default">🖨 Печать</button>
+  <a href="{{ settings_url }}" class="button">⚙ Настройки печати</a>
   <a href="javascript:history.back()" class="button">← Назад</a>
 </div>
 
 <div class="sheet">
   {% for item in items %}
     <div class="card">
+      {% if print_settings.text_position == 'top' %}
+        <div class="meta">
+          <div><b>ID QR:</b> {{ item.qr.id }}</div>
+          <div><b>Инв. №:</b> {{ item.device.inventory_number }}</div>
+          <div><b>Техника:</b> {{ item.device.name }}</div>
+        </div>
+      {% endif %}
+
       {% if item.image_url %}
         <img class="qr-img" src="{{ item.image_url }}" alt="QR {{ item.qr.code }}">
       {% else %}
         <div style="height:200px; display:flex; align-items:center; justify-content:center; color:#999;">Нет изображения</div>
       {% endif %}
-      <div class="meta">
-        <div><b>ID QR:</b> {{ item.qr.id }}</div>
-        <div><b>Инв. №:</b> {{ item.device.inventory_number }}</div>
-        <div><b>Техника:</b> {{ item.device.name }}</div>
-      </div>
+
+      {% if print_settings.text_position == 'bottom' %}
+        <div class="meta">
+          <div><b>ID QR:</b> {{ item.qr.id }}</div>
+          <div><b>Инв. №:</b> {{ item.device.inventory_number }}</div>
+          <div><b>Техника:</b> {{ item.device.name }}</div>
+        </div>
+      {% endif %}
     </div>
   {% endfor %}
 </div>

@@ -2,10 +2,10 @@ import asyncio
 from django.contrib import admin
 from django.contrib.auth.models import Group
 from django.contrib import messages
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
-from ..models import Department, Employee, RegistrationRequest, Admin, ImportAction
+from ..models import Department, Employee, RegistrationRequest, Admin, ImportAction, MovementCard, QRPrintSettings
 from ...bot.notifications import send_message_sync
 from ..utils import export_queryset_to_excel
 
@@ -241,3 +241,80 @@ class ImportActionAdmin(admin.ModelAdmin):
         return False
 
 admin.site.register(ImportAction, ImportActionAdmin)
+
+@admin.register(QRPrintSettings)
+class QRPrintSettingsAdmin(admin.ModelAdmin):
+    list_display = ('id', 'card_width_mm', 'card_height_mm', 'qr_size_px', 'text_size_px', 'text_position')
+
+    def has_add_permission(self, request):
+        return not QRPrintSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MovementCard)
+class MovementCardAdmin(admin.ModelAdmin):
+    list_display = ('id', 'device_inventory', 'device_name', 'from_department', 'to_department', 'from_responsible', 'to_responsible', 'created_at')
+    list_filter = ('history__device__department', 'created_at')
+    search_fields = ('history__device__inventory_number', 'history__device__name', 'history__old_value', 'history__new_value')
+    actions = ['print_cards']
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('history__device__department', 'history__device__responsible')
+
+    def device_inventory(self, obj):
+        return obj.history.device.inventory_number
+
+    def device_name(self, obj):
+        return obj.history.device.name
+
+    def from_department(self, obj):
+        previous = (
+            obj.history.device.history
+            .filter(field='department', timestamp__lte=obj.history.timestamp)
+            .exclude(pk=obj.history.pk)
+            .order_by('-timestamp')
+            .first()
+        )
+        return previous.new_value if previous else (obj.history.device.department.name if obj.history.device.department else '—')
+
+    def to_department(self, obj):
+        dep_change = obj.history.device.history.filter(field='department', timestamp__lte=obj.history.timestamp).order_by('-timestamp').first()
+        return dep_change.new_value if dep_change else (obj.history.device.department.name if obj.history.device.department else '—')
+
+    def from_responsible(self, obj):
+        return obj.history.old_value or '—'
+
+    def to_responsible(self, obj):
+        return obj.history.new_value or '—'
+
+    def print_cards(self, request, queryset):
+        settings_obj, _ = QRPrintSettings.objects.get_or_create(pk=1)
+        items = []
+        for card in queryset.select_related('history__device__department', 'history__device__responsible'):
+            device = card.history.device
+            dep_from = self.from_department(card)
+            dep_to = self.to_department(card)
+            items.append({
+                'card': card,
+                'device': device,
+                'from_department': dep_from,
+                'to_department': dep_to,
+                'from_responsible': card.history.old_value or '—',
+                'to_responsible': card.history.new_value or '—',
+            })
+
+        return render(
+            request,
+            'admin/print_movement_cards.html',
+            {
+                'title': 'Печать карточек перемещения',
+                'items': items,
+                'print_settings': settings_obj,
+                'settings_url': reverse('admin:core_qrprintsettings_change', args=[settings_obj.id]),
+            },
+        )
+
+    print_cards.short_description = 'Печать карточек перемещения'
+

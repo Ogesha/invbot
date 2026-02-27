@@ -8,7 +8,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.core.files import File
 from django.db import models
-from ..models import Device, DeviceType, QRCode, Computer, Printer, Employee
+from ..models import Device, DeviceType, QRCode, Computer, Printer, Employee, QRPrintSettings
 from ..utils import export_queryset_to_excel, export_qrcodes_with_images_to_excel
 from ...qr_generator.utils import generate_qr_image_for_device
 from .inlines import QRCodeInline, DeviceHistoryInline
@@ -143,10 +143,13 @@ class BaseDeviceAdmin(admin.ModelAdmin):
                 'image_url': qr.image.url if qr.image else None,
             })
 
+        settings_obj, _ = QRPrintSettings.objects.get_or_create(pk=1)
         context = {
             'title': 'Печать QR-кодов',
             'items': items,
             'opts': self.model._meta,
+            'print_settings': settings_obj,
+            'settings_url': reverse('admin:core_qrprintsettings_change', args=[settings_obj.id]),
         }
         return render(request, 'admin/print_qr_codes.html', context)
     print_qr_codes.short_description = "Печать QR-кодов"
