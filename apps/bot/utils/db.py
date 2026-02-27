@@ -128,12 +128,13 @@ def get_employee_data_safe(employee_id):
             'full_name': emp.full_name,
             'department_name': emp.department.name if emp.department else None,
             'is_approved': emp.is_approved,
+            'telegram_id': emp.telegram_id,
         }
     except Employee.DoesNotExist:
         return None
 
 @sync_to_async
-def update_employee(employee_id, full_name=None, department_id=None, is_approved=None):
+def update_employee(employee_id, full_name=None, department_id=None, is_approved=None, telegram_id=...):
     try:
         emp = Employee.objects.get(id=employee_id)
         if full_name is not None:
@@ -142,6 +143,8 @@ def update_employee(employee_id, full_name=None, department_id=None, is_approved
             emp.department_id = department_id
         if is_approved is not None:
             emp.is_approved = is_approved
+        if telegram_id is not ...:
+            emp.telegram_id = telegram_id
         emp.save()
         return emp
     except Employee.DoesNotExist:
@@ -167,9 +170,9 @@ def get_employee_devices(employee_id):
 # ---------- Функции для QR-кодов ----------
 @sync_to_async
 def create_qr_code():
-    from apps.qr_generator.utils import generate_simple_qr_image_api
     qr = QRCode.objects.create(is_active=True)
     qr.generate_simple_image()
+    qr.refresh_from_db(fields=['image'])
     return qr
 
 @sync_to_async
@@ -196,10 +199,16 @@ def assign_qr_to_device(qr_id, device_id):
     try:
         qr = QRCode.objects.get(id=qr_id, is_active=True)
         device = Device.objects.get(id=device_id)
-        if device.qr_code and device.qr_code != qr:
-            old_qr = device.qr_code
-            old_qr.device = None
-            old_qr.save()
+
+        # Разрешаем привязку только к свободной технике (без QR)
+        try:
+            existing_qr = device.qr_code
+        except QRCode.DoesNotExist:
+            existing_qr = None
+
+        if existing_qr and existing_qr != qr:
+            return False, f"Устройство {device.inventory_number} уже имеет QR-код (ID {existing_qr.id})"
+
         qr.device = device
         qr.save()
         qr.generate_image()
@@ -211,6 +220,39 @@ def assign_qr_to_device(qr_id, device_id):
 def get_all_devices():
     from apps.core.models import Device
     return list(Device.objects.select_related('department', 'responsible').all().order_by('inventory_number'))
+
+@sync_to_async
+def get_device_data(device_id):
+    try:
+        return Device.objects.select_related('department', 'responsible').get(id=device_id)
+    except Device.DoesNotExist:
+        return None
+
+@sync_to_async
+def change_device_responsible(device_id, new_responsible_id):
+    try:
+        device = Device.objects.select_related('department', 'responsible').get(id=device_id)
+        employee = Employee.objects.select_related('department').get(id=new_responsible_id)
+    except (Device.DoesNotExist, Employee.DoesNotExist):
+        return False, 'Устройство или сотрудник не найдены', None
+
+    old_responsible = device.responsible
+    old_department = device.department
+
+    device.responsible = employee
+    if employee.department and employee.department != device.department:
+        device.department = employee.department
+    device.save()
+
+    device.refresh_from_db(fields=['department', 'responsible'])
+    movement_info = {
+        'device': device,
+        'from_department': old_department.name if old_department else '—',
+        'to_department': device.department.name if device.department else '—',
+        'from_responsible': old_responsible.full_name if old_responsible else '—',
+        'to_responsible': device.responsible.full_name if device.responsible else '—',
+    }
+    return True, 'Ответственный успешно изменён', movement_info
 
 @sync_to_async
 def get_devices_without_qr():
@@ -351,7 +393,7 @@ def create_device_with_qr(code, name, inventory_number, device_type_id, departme
         device_type_id=device_type_id,
         department_id=department_id,
         responsible_id=responsible_id,
-        status=True
+        status='in_use'
     )
     QRCode.objects.create(device=device, code=code, is_active=True)
     return device

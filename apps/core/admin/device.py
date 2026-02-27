@@ -1,16 +1,17 @@
+import os
 from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
 from django.contrib import messages
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django import forms
 from django.core.exceptions import ValidationError
+from django.core.files import File
 from django.db import models
-from ..models import Device, DeviceType, QRCode, Computer, Printer, Employee
+from ..models import Device, DeviceType, QRCode, Computer, Printer, Employee, QRPrintSettings
 from ..utils import export_queryset_to_excel, export_qrcodes_with_images_to_excel
 from ...qr_generator.utils import generate_qr_image_for_device
 from .inlines import QRCodeInline, DeviceHistoryInline
-from ..tasks import generate_qr_codes_for_devices
 from django.db.models import OuterRef, Exists
 
 
@@ -76,9 +77,18 @@ class BaseDeviceAdmin(admin.ModelAdmin):
     inlines = [QRCodeInline, DeviceHistoryInline]
     actions = ['generate_qr_codes', 'print_qr_codes', 'export_to_excel', 'generate_qr_codes_with_path']
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related('qr_code')
+
     def qr_code_link(self, obj):
-        if hasattr(obj, 'qr_code') and obj.qr_code:
-            return f"QR {obj.qr_code.code}"
+        try:
+            qr = obj.qr_code
+        except QRCode.DoesNotExist:
+            qr = None
+
+        if qr:
+            return format_html('<b>ID: {}</b><br><span style="font-size:11px;">{}</span>', qr.id, qr.code)
         return "—"
     qr_code_link.short_description = "QR-код"
 
@@ -87,21 +97,62 @@ class BaseDeviceAdmin(admin.ModelAdmin):
     status_display.short_description = "Статус"
 
     def generate_qr_codes(self, request, queryset):
-        device_ids = list(queryset.values_list('id', flat=True))
-        task = generate_qr_codes_for_devices.delay(device_ids)
-        request.session['last_qr_task_id'] = task.id
+        generated = 0
+        reused = 0
+        errors = 0
+
+        for device in queryset:
+            try:
+                qr, created = QRCode.objects.get_or_create(device=device)
+
+                if not created and qr.image:
+                    reused += 1
+                    continue
+
+                filepath = generate_qr_image_for_device(device)
+                if filepath and os.path.exists(filepath):
+                    with open(filepath, 'rb') as f:
+                        qr.image.save(os.path.basename(filepath), File(f), save=False)
+                    qr.save(update_fields=['image'])
+                    generated += 1
+                else:
+                    errors += 1
+            except Exception:
+                errors += 1
+
+        level = messages.SUCCESS if errors == 0 else messages.WARNING
         self.message_user(
             request,
-            f"⏳ Задача на генерацию QR-кодов для {len(device_ids)} устройств запущена. "
-            f"ID задачи: {task.id}. Результат будет доступен в логах.",
-            level=messages.INFO
+            f"Сгенерировано новых QR: {generated}. Уже были готовы: {reused}. Ошибок: {errors}.",
+            level=level,
         )
         return redirect(request.get_full_path())
-    generate_qr_codes.short_description = "Сгенерировать QR-коды (асинхронно)"
+    generate_qr_codes.short_description = "Сгенерировать QR-коды"
 
     def print_qr_codes(self, request, queryset):
-        self.message_user(request, "Функция печати QR-кодов будет реализована отдельно.", messages.WARNING)
-    print_qr_codes.short_description = "Подготовить QR-коды к печати"
+        items = []
+        for device in queryset.select_related('device_type'):
+            qr, _ = QRCode.objects.get_or_create(device=device)
+            if not qr.image:
+                qr.generate_image()
+                qr.refresh_from_db(fields=['image'])
+
+            items.append({
+                'device': device,
+                'qr': qr,
+                'image_url': qr.image.url if qr.image else None,
+            })
+
+        settings_obj, _ = QRPrintSettings.objects.get_or_create(pk=1)
+        context = {
+            'title': 'Печать QR-кодов',
+            'items': items,
+            'opts': self.model._meta,
+            'print_settings': settings_obj,
+            'settings_url': reverse('admin:core_qrprintsettings_change', args=[settings_obj.id]),
+        }
+        return render(request, 'admin/print_qr_codes.html', context)
+    print_qr_codes.short_description = "Печать QR-кодов"
 
     def export_to_excel(self, request, queryset):
         fields = [
@@ -214,7 +265,7 @@ class QRCodeAdmin(admin.ModelAdmin):
     list_display = ('id', 'code', 'device', 'created_at', 'is_active', 'image_preview')
     list_filter = ('is_active', 'created_at', 'device__department')
     search_fields = ('code', 'device__inventory_number')
-    readonly_fields = ('image_preview_detail', 'device_short_info')
+    readonly_fields = ('id', 'image_preview_detail', 'device_short_info')
     autocomplete_fields = ['device']
     actions = [
         'deactivate_qr', 'activate_qr', 'regenerate_image',
@@ -223,7 +274,7 @@ class QRCodeAdmin(admin.ModelAdmin):
     ]
 
     fieldsets = (
-        (None, {'fields': ('code', 'device', 'is_active')}),
+        (None, {'fields': ('id', 'code', 'device', 'is_active', 'device_short_info')}),
         ('Изображение', {'fields': ('image', 'image_preview_detail'), 'classes': ('wide',)}),
     )
 
@@ -259,21 +310,12 @@ class QRCodeAdmin(admin.ModelAdmin):
 
     def device_short_info(self, obj):
         if obj.device:
-            if hasattr(obj.device, 'printer'):
-                return format_html(
-                    "ID QR: {}<br>Инв. №: {}",
-                    obj.id,
-                    obj.device.inventory_number
-                )
-            else:
-                return format_html(
-                    "ID QR: {}<br>Код: {}<br>Устройство: {}<br>Инв. №: {}<br>Тип: {}",
-                    obj.id,
-                    obj.code,
-                    obj.device.name,
-                    obj.device.inventory_number,
-                    obj.device.device_type.name if obj.device.device_type else '—'
-                )
+            return format_html(
+                "ID QR: {}<br>Устройство: {}<br>Инв. №: {}",
+                obj.id,
+                obj.device.name,
+                obj.device.inventory_number,
+            )
         return "—"
     device_short_info.short_description = "Информация об устройстве"
 
@@ -288,10 +330,15 @@ class QRCodeAdmin(admin.ModelAdmin):
     activate_qr.short_description = "Активировать выбранные QR-коды"
 
     def regenerate_image(self, request, queryset):
-        for qr in queryset.filter(device__isnull=False):
-            qr.generate_image()
-        self.message_user(request, f"Изображения обновлены для привязанных QR-кодов.")
-    regenerate_image.short_description = "Перегенерировать изображения (только для привязанных)"
+        regenerated = 0
+        for qr in queryset:
+            if qr.device:
+                qr.generate_image()
+            else:
+                qr.generate_simple_image()
+            regenerated += 1
+        self.message_user(request, f"Изображения обновлены для {regenerated} QR-кодов.")
+    regenerate_image.short_description = "Перегенерировать изображения"
 
     def export_to_excel(self, request, queryset):
         fields = ['code', 'device__inventory_number', 'device__name', 'created_at', 'is_active']

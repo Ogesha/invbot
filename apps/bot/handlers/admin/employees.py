@@ -1,5 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from aiogram.types import InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from asgiref.sync import sync_to_async
 from aiogram.exceptions import TelegramBadRequest
@@ -28,7 +30,7 @@ def get_department_by_id(dept_id):
         return None
 
 # ---------- Редактирование сотрудника ----------
-@router.callback_query(F.data.startswith("emp_edit_"))
+@router.callback_query(F.data.regexp(r"^emp_edit_\d+$"))
 async def employee_edit_card(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Нет прав", show_alert=True)
