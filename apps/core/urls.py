@@ -9,4 +9,5 @@ urlpatterns = [
     path('api/device/<int:device_id>/qr/', views.device_qr_api, name='device_qr_api'),
     path('computer-list-partial/', views.computer_list_partial, name='computer_list_partial'),
     path('get-employees-by-department/', views.get_employees_by_department, name='get_employees_by_department'),
+    path('api/movement-card/print/', views.movement_card_print_endpoint, name='movement_card_print_endpoint'),
 ]
