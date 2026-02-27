@@ -81,7 +81,7 @@ def device_pre_save_handler(sender, instance, **kwargs):
 
     if changes:
         msg = f"✏️ Изменено устройство: {instance.inventory_number} – {instance.name}\n" + "\n".join(changes)
-        send_log_to_group_sync(msg)
+        send_log_to_group_sync(msg, log_type='device')
 
 
 @receiver(post_save)
@@ -93,7 +93,7 @@ def create_qr_for_device(sender, instance, created, **kwargs):
     if created:
         QRCode.objects.get_or_create(device=instance)
         msg = f"🆕 Создано новое устройство: {instance.inventory_number} – {instance.name}"
-        send_log_to_group_sync(msg)
+        send_log_to_group_sync(msg, log_type='device')
 
 
 @receiver(post_delete)
@@ -101,7 +101,7 @@ def log_device_delete(sender, instance, **kwargs):
     if not isinstance(instance, Device):
         return
     msg = f"🗑 Удалено устройство: {instance.inventory_number} – {instance.name}"
-    send_log_to_group_sync(msg)
+    send_log_to_group_sync(msg, log_type='device')
 
 
 @receiver(post_save)
@@ -112,7 +112,7 @@ def log_department_save(sender, instance, created, **kwargs):
         return
     action = "Создан" if created else "Изменён"
     msg = f"{action} отдел: {instance.name}"
-    send_log_to_group_sync(msg)
+    send_log_to_group_sync(msg, log_type='department')
 
 
 @receiver(post_delete)
@@ -120,7 +120,7 @@ def log_department_delete(sender, instance, **kwargs):
     if not isinstance(instance, Department):
         return
     msg = f"Удалён отдел: {instance.name}"
-    send_log_to_group_sync(msg)
+    send_log_to_group_sync(msg, log_type='department')
 
 
 @receiver(post_save)
@@ -132,7 +132,7 @@ def log_employee_save(sender, instance, created, **kwargs):
     action = "Создан" if created else "Изменён"
     dept = f" (отдел: {instance.department.name})" if instance.department else ""
     msg = f"{action} сотрудник: {instance.full_name}{dept}"
-    send_log_to_group_sync(msg)
+    send_log_to_group_sync(msg, log_type='employee')
 
 
 @receiver(post_delete)
@@ -140,7 +140,7 @@ def log_employee_delete(sender, instance, **kwargs):
     if not isinstance(instance, Employee):
         return
     msg = f"Удалён сотрудник: {instance.full_name}"
-    send_log_to_group_sync(msg)
+    send_log_to_group_sync(msg, log_type='employee')
 
 
 @receiver(post_save, sender=QRCode)
@@ -157,16 +157,16 @@ def log_qrcode_save(sender, instance, created, **kwargs):
         return
 
     if instance.image and os.path.exists(instance.image.path):
-        send_photo_sync(group_id, instance.image.path, caption=msg)
+        send_photo_sync(group_id, instance.image.path, caption=msg, log_type='qr')
     else:
-        send_log_to_group_sync(msg)
+        send_log_to_group_sync(msg, log_type='qr')
 
 
 @receiver(post_delete, sender=QRCode)
 def log_qrcode_delete(sender, instance, **kwargs):
     device_info = f" для устройства {instance.device.inventory_number}" if instance.device else ""
     msg = f"🗑 Удалён QR-код: {instance.code}{device_info}"
-    send_log_to_group_sync(msg)
+    send_log_to_group_sync(msg, log_type='qr')
 
 
 @receiver(post_save)
@@ -177,7 +177,7 @@ def log_regrequest_save(sender, instance, created, **kwargs):
         return
     action = "Создана" if created else "Изменена"
     msg = f"{action} заявка на регистрацию: {instance.full_name} (ID {instance.telegram_id})"
-    send_log_to_group_sync(msg)
+    send_log_to_group_sync(msg, log_type='request')
 
 
 @receiver(post_delete)
@@ -185,7 +185,7 @@ def log_regrequest_delete(sender, instance, **kwargs):
     if not isinstance(instance, RegistrationRequest):
         return
     msg = f"Удалена заявка на регистрацию: {instance.full_name} (ID {instance.telegram_id})"
-    send_log_to_group_sync(msg)
+    send_log_to_group_sync(msg, log_type='request')
 
 
 @receiver(post_delete)
