@@ -30,6 +30,10 @@ class QrAssignStates(StatesGroup):
     waiting_for_qr_id = State()
     waiting_for_device = State()
 
+class MoveDeviceStates(StatesGroup):
+    waiting_for_device = State()
+    waiting_for_employee = State()
+
 # ---------- Функция возврата в главное меню ----------
 async def back_to_main_menu(callback_or_message, user_id):
     admin_flag = await is_admin(user_id)

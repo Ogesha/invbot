@@ -1,0 +1,46 @@
+{% extends "admin/base_site.html" %}
+
+{% block extrastyle %}
+<style>
+  .sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .card {
+    border: 1px dashed #bbb;
+    width: {{ print_settings.card_width_mm }}mm;
+    min-height: {{ print_settings.card_height_mm }}mm;
+    padding: 10px;
+    background: #fff;
+    font-size: {{ print_settings.text_size_px }}px;
+    page-break-inside: avoid;
+    box-sizing: border-box;
+  }
+  .title { font-weight: 700; margin-bottom: 8px; text-align: center; font-size: {{ print_settings.title_size_px }}px; }
+  .row { margin-bottom: 4px; }
+  @media print {
+    .no-print { display: none !important; }
+    .card { border: 1px solid #ddd; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="no-print" style="margin-bottom:12px;display:flex;gap:8px;">
+  <button onclick="window.print()" class="button default">🖨 Печать</button>
+  <a href="{{ settings_url }}" class="button">⚙ Настройки печати</a>
+  <a href="javascript:history.back()" class="button">← Назад</a>
+</div>
+
+<div class="sheet">
+  {% for item in items %}
+    <div class="card">
+      <div class="title">Карточка перемещения</div>
+      <div class="row"><b>Техника:</b> {{ item.device.name }}</div>
+      <div class="row"><b>Инвентарник:</b> {{ item.device.inventory_number }}</div>
+      <div class="row"><b>Отдел (откуда):</b> {{ item.from_department }}</div>
+      <div class="row"><b>Ответственный (откуда):</b> {{ item.from_responsible }}</div>
+      <div class="row"><b>Отдел (куда):</b> {{ item.to_department }}</div>
+      <div class="row"><b>Ответственный (куда):</b> {{ item.to_responsible }}</div>
+      <div class="row"><b>Дата:</b> {{ item.card.created_at|date:"d.m.Y H:i" }}</div>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

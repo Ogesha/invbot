@@ -33,7 +33,7 @@ async def departments_menu(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Нет прав", show_alert=True)
         return
-    depts = await get_all_departments()
+    depts = await get_all_departments(callback.from_user.id)
     kb = departments_keyboard(depts, action_prefix="dept")
     await callback.message.edit_text("🏢 Выберите отдел:", reply_markup=kb)
     await callback.answer()
@@ -44,7 +44,7 @@ async def show_department_employees(callback: CallbackQuery):
         await callback.answer("⛔ Нет прав", show_alert=True)
         return
     dept_id = int(callback.data.split("_")[-1])
-    employees = await get_employees_by_department(dept_id)
+    employees = await get_employees_by_department(dept_id, callback.from_user.id)
     if not employees:
         await callback.message.edit_text("В этом отделе нет сотрудников.")
         await callback.answer()
@@ -70,7 +70,7 @@ async def paginate_employees(callback: CallbackQuery):
     parts = callback.data.split("_")
     dept_id = int(parts[3])
     page = int(parts[4])
-    employees = await get_employees_by_department(dept_id)
+    employees = await get_employees_by_department(dept_id, callback.from_user.id)
     kb = employees_by_department_keyboard(employees, dept_id, page=page)
     try:
         await callback.message.edit_reply_markup(reply_markup=kb)

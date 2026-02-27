@@ -1,12 +1,30 @@
 import uuid
-import os
 from django.db import models
-from django.core.files import File
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+
+
+User = get_user_model()
+
+
+class Region(models.Model):
+    name = models.CharField("Регион", max_length=100, unique=True)
+
+    class Meta:
+        verbose_name = "Регион"
+        verbose_name_plural = "Регионы"
+
+    def __str__(self):
+        return self.name
+
 
 class Department(models.Model):
     name = models.CharField("Название", max_length=100, unique=True)
     description = models.TextField("Описание", blank=True)
+    region = models.ForeignKey(
+        Region, on_delete=models.SET_NULL, null=True, blank=True,
+        verbose_name="Регион", related_name="departments"
+    )
 
     class Meta:
         verbose_name = "Отдел"
@@ -82,6 +100,10 @@ class Device(models.Model):
         related_name='devices'
     )
     description = models.TextField("Описание", blank=True)
+    region = models.ForeignKey(
+        Region, on_delete=models.SET_NULL, null=True, blank=True,
+        verbose_name="Регион", related_name="devices"
+    )
     department = models.ForeignKey(
         Department, on_delete=models.SET_NULL, null=True,
         verbose_name="Отдел", blank=True, related_name='devices'
@@ -172,22 +194,23 @@ class QRCode(models.Model):
             self.generate_simple_image()
 
     def generate_image(self):
-        """Генерирует полноценное изображение с информацией об устройстве (через API или локально)."""
-        from ..qr_generator.utils import generate_qr_image_for_device
-        filepath = generate_qr_image_for_device(self.device)
-        if filepath and os.path.exists(filepath):
-            with open(filepath, 'rb') as f:
-                self.image.save(os.path.basename(filepath), File(f), save=False)
-            self.save(update_fields=['image'])
+        """Генерирует изображение QR для привязанной техники."""
+        if not self.device:
+            return
+
+        from ..qr_generator.utils import _build_start_link, build_qr_png_content
+
+        content = build_qr_png_content(_build_start_link(self.code))
+        self.image.save(f"{self.device.inventory_number}.png", content, save=False)
+        self.save(update_fields=['image'])
 
     def generate_simple_image(self):
-        """Генерирует простое изображение только с кодом (через API или локально)."""
-        from ..qr_generator.utils import generate_simple_qr_image_api
-        filepath = generate_simple_qr_image_api(self.code)
-        if filepath and os.path.exists(filepath):
-            with open(filepath, 'rb') as f:
-                self.image.save(os.path.basename(filepath), File(f), save=False)
-            self.save(update_fields=['image'])
+        """Генерирует изображение QR только с кодом."""
+        from ..qr_generator.utils import _build_start_link, build_qr_png_content
+
+        content = build_qr_png_content(_build_start_link(self.code))
+        self.image.save(f"{self.code}.png", content, save=False)
+        self.save(update_fields=['image'])
 
     def __str__(self):
         if self.device:
@@ -227,6 +250,95 @@ class DeviceHistory(models.Model):
 
     def __str__(self):
         return f"{self.device} – {self.get_field_display()} изменён {self.timestamp.strftime('%d.%m.%Y %H:%M')}"
+
+
+class QRPrintSettings(models.Model):
+    TEXT_POSITION_CHOICES = [
+        ('top', 'Сверху'),
+        ('bottom', 'Снизу'),
+        ('none', 'Скрыть текст'),
+    ]
+
+    card_width_mm = models.PositiveIntegerField("Ширина карточки (мм)", default=70)
+    card_height_mm = models.PositiveIntegerField("Высота карточки (мм)", default=95)
+    qr_size_px = models.PositiveIntegerField("Размер QR (px)", default=220)
+    text_size_px = models.PositiveIntegerField("Размер текста (px)", default=13)
+    text_position = models.CharField("Позиция текста", max_length=10, choices=TEXT_POSITION_CHOICES, default='bottom')
+
+    class Meta:
+        verbose_name = "Настройки печати QR"
+        verbose_name_plural = "Настройки печати QR"
+
+    def __str__(self):
+        return "Настройки печати QR"
+
+
+class MovementCardPrintSettings(models.Model):
+    card_width_mm = models.PositiveIntegerField("Ширина карточки (мм)", default=90)
+    card_height_mm = models.PositiveIntegerField("Высота карточки (мм)", default=70)
+    text_size_px = models.PositiveIntegerField("Размер текста (px)", default=13)
+    title_size_px = models.PositiveIntegerField("Размер заголовка (px)", default=16)
+
+    class Meta:
+        verbose_name = "Настройки печати карточек перемещения"
+        verbose_name_plural = "Настройки печати карточек перемещения"
+
+    def __str__(self):
+        return "Настройки печати карточек перемещения"
+
+
+class MovementCard(models.Model):
+    history = models.OneToOneField(
+        DeviceHistory,
+        on_delete=models.CASCADE,
+        related_name='movement_card',
+        verbose_name="История перемещения",
+    )
+    from_department = models.CharField("Отдел (откуда)", max_length=150, blank=True, default='—')
+    to_department = models.CharField("Отдел (куда)", max_length=150, blank=True, default='—')
+    from_responsible = models.CharField("Ответственный (откуда)", max_length=200, blank=True, default='—')
+    to_responsible = models.CharField("Ответственный (куда)", max_length=200, blank=True, default='—')
+    created_at = models.DateTimeField("Дата создания", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Карточка перемещения"
+        verbose_name_plural = "Карточки перемещения"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Карточка перемещения #{self.id} ({self.history.device.inventory_number})"
+
+    @property
+    def device(self):
+        return self.history.device
+
+
+class AdminScope(models.Model):
+    PRINTER_BACKEND_CHOICES = [
+        ('none', 'Не использовать'),
+        ('http', 'HTTP endpoint'),
+    ]
+
+    django_user = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True, verbose_name='Пользователь Django')
+    employee = models.OneToOneField(Employee, on_delete=models.CASCADE, null=True, blank=True, verbose_name='Сотрудник (бот)')
+    can_manage_all_regions = models.BooleanField('Доступ ко всем регионам', default=False)
+    allowed_regions = models.ManyToManyField(Region, blank=True, verbose_name='Разрешенные регионы')
+    can_manage_devices = models.BooleanField('Управление техникой', default=True)
+    can_manage_employees = models.BooleanField('Управление сотрудниками', default=True)
+    can_manage_qr = models.BooleanField('Управление QR', default=True)
+    can_manage_movements = models.BooleanField('Управление перемещениями', default=True)
+    can_print_from_bot = models.BooleanField('Разрешить печать из бота', default=False)
+    printer_backend = models.CharField('Тип подключения принтера', max_length=20, choices=PRINTER_BACKEND_CHOICES, default='none')
+    printer_endpoint = models.URLField('Сетевой endpoint принтера', blank=True)
+
+    class Meta:
+        verbose_name = 'Права администратора (регион/бот)'
+        verbose_name_plural = 'Права администраторов (регион/бот)'
+
+    def __str__(self):
+        base = self.employee.full_name if self.employee else (self.django_user.username if self.django_user else 'Без привязки')
+        return f'Права: {base}'
+
 
 
 class ImportAction(models.Model):
