@@ -3,9 +3,10 @@ import logging
 from django.db.models.signals import pre_save, post_save, post_delete
 from django.dispatch import receiver
 from django.conf import settings
+from django.apps import apps
 from .models import (
     Department, Employee, Device,
-    QRCode, RegistrationRequest, DeviceHistory, MovementCard
+    QRCode, RegistrationRequest, DeviceHistory
 )
 from .utils import send_log_to_group_sync
 from ..bot.notifications import send_photo_sync
@@ -43,18 +44,23 @@ def device_pre_save_handler(sender, instance, **kwargs):
             old_value=old_resp_str,
             new_value=new_resp_str
         )
-        MovementCard.objects.update_or_create(
-            history=history,
-            defaults={
-                'device': instance,
-                'to_department_obj': instance.department,
-                'to_responsible_obj': instance.responsible,
-                'from_department': old_dept_str,
-                'to_department': new_dept_str,
-                'from_responsible': old_resp_str,
-                'to_responsible': new_resp_str,
-            },
-        )
+        try:
+            movement_card_model = apps.get_model('core', 'MovementCard')
+        except LookupError:
+            movement_card_model = None
+        if movement_card_model is not None:
+            movement_card_model.objects.update_or_create(
+                history=history,
+                defaults={
+                    'device': instance,
+                    'to_department_obj': instance.department,
+                    'to_responsible_obj': instance.responsible,
+                    'from_department': old_dept_str,
+                    'to_department': new_dept_str,
+                    'from_responsible': old_resp_str,
+                    'to_responsible': new_resp_str,
+                },
+            )
         changes.append(f"Ответственный: {old_resp_str} → {new_resp_str}")
 
     if old.department != instance.department:
