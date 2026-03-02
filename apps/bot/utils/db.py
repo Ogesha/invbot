@@ -120,7 +120,7 @@ def get_all_employees_data(admin_telegram_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(region_id__in=region_ids)
+            qs = qs.filter(department__region_id__in=region_ids)
     return list(qs.order_by('full_name').values('id', 'full_name', 'is_approved', 'department__name'))
 
 @sync_to_async
@@ -131,7 +131,7 @@ def get_all_employees_with_dept(admin_telegram_id=None, department_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(region_id__in=region_ids)
+            qs = qs.filter(department__region_id__in=region_ids)
     return list(qs.order_by('full_name'))
 
 @sync_to_async
@@ -149,7 +149,7 @@ def get_employees_by_department(department_id, admin_telegram_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(region_id__in=region_ids)
+            qs = qs.filter(department__region_id__in=region_ids)
     return list(qs.order_by('full_name'))
 
 @sync_to_async
@@ -267,7 +267,7 @@ def get_all_devices(admin_telegram_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(region_id__in=region_ids)
+            qs = qs.filter(department__region_id__in=region_ids)
     return list(qs.order_by('inventory_number'))
 
 @sync_to_async
@@ -321,7 +321,7 @@ def get_devices_without_qr(admin_telegram_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(region_id__in=region_ids)
+            qs = qs.filter(department__region_id__in=region_ids)
     return list(qs.order_by('inventory_number'))
 
 @sync_to_async

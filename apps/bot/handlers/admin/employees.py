@@ -231,7 +231,7 @@ async def process_employee_fullname(message: Message, state: FSMContext):
         await message.answer("Слишком короткое имя. Введите ФИО полностью.")
         return
     await state.update_data(full_name=full_name)
-    depts = await get_all_departments(callback.from_user.id)
+    depts = await get_all_departments(message.from_user.id)
     if not depts:
         await message.answer("В системе нет отделов. Сначала создайте отдел через /add_department или в админке.")
         await state.clear()

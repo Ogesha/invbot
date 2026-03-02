@@ -151,7 +151,10 @@ def send_log_to_group_sync(message: str, log_type: str | None = None):
 
     event_type = log_type or _detect_log_type(message)
     thread_id = _get_or_create_topic_thread(group_id, event_type)
-    send_message_sync(group_id, message, message_thread_id=thread_id)
+    sent = send_message_sync(group_id, message, message_thread_id=thread_id)
+    if not sent and thread_id:
+        # Fallback: если тема недоступна/закрыта, отправляем в общий чат
+        send_message_sync(group_id, message)
 
 
 def send_photo_sync(chat_id, photo_path, caption=None, retries=3, message_thread_id=None, log_type=None):
@@ -182,8 +185,16 @@ def send_photo_sync(chat_id, photo_path, caption=None, retries=3, message_thread
                 logger.warning(f"Rate limited (429), waiting {wait}s before retry {attempt+1}/{retries}")
                 time.sleep(wait)
             else:
+                if message_thread_id:
+                    logger.warning('Retry sendPhoto without topic thread due to HTTP error')
+                    message_thread_id = None
+                    continue
                 logger.error(f"Failed to send photo to {chat_id}: {e}", exc_info=True)
                 return False
         except Exception as e:
+            if message_thread_id:
+                logger.warning('Retry sendPhoto without topic thread due to error: %s', e)
+                message_thread_id = None
+                continue
             logger.error(f"Failed to send photo to {chat_id}: {e}", exc_info=True)
             return False
