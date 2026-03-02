@@ -8,10 +8,17 @@ from asgiref.sync import sync_to_async
 logger = logging.getLogger(__name__)
 bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
 
+
+def _telegram_method_url(method: str) -> str:
+    token = settings.TELEGRAM_BOT_TOKEN
+    return f"https://api.telegram.org/bot{token}/{method}"
+
+
 @sync_to_async
 def get_admin_telegram_ids():
     from apps.core.models import Employee
     return list(Employee.objects.filter(is_admin=True, is_approved=True, telegram_id__isnull=False).values_list('telegram_id', flat=True))
+
 
 async def notify_admins_about_request(request):
     admin_ids = await get_admin_telegram_ids()
@@ -32,6 +39,7 @@ async def notify_admins_about_request(request):
         except Exception as e:
             logger.error(f"Failed to notify admin {admin_id}: {e}", exc_info=True)
 
+
 async def notify_user_about_approval(telegram_id, full_name):
     try:
         await bot.send_message(
@@ -45,6 +53,7 @@ async def notify_user_about_approval(telegram_id, full_name):
         logger.error(f"Failed to send approval notification to {telegram_id}: {e}", exc_info=True)
         return False
 
+
 async def notify_user_about_rejection(telegram_id, full_name, comment=""):
     text = f"❌ Ваша заявка на регистрацию отклонена."
     if comment:
@@ -57,13 +66,12 @@ async def notify_user_about_rejection(telegram_id, full_name, comment=""):
         logger.error(f"Failed to send rejection notification to {telegram_id}: {e}", exc_info=True)
         return False
 
+
 def send_message_sync(chat_id, text):
-    """Синхронная отправка сообщения через requests (без asyncio)"""
-    token = settings.TELEGRAM_BOT_TOKEN
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    """Синхронная отправка сообщения через requests (без asyncio)."""
     payload = {'chat_id': chat_id, 'text': text}
     try:
-        response = requests.post(url, data=payload, timeout=5)
+        response = requests.post(_telegram_method_url('sendMessage'), data=payload, timeout=5)
         response.raise_for_status()
         logger.info(f"Sync message sent to {chat_id}")
         return True
@@ -71,8 +79,9 @@ def send_message_sync(chat_id, text):
         logger.error(f"Failed to send sync message to {chat_id}: {e}", exc_info=True)
         return False
 
-def send_log_to_group_sync(message: str):
-    """Отправить сообщение в группу/канал для логов (синхронно)"""
+
+def send_log_to_group_sync(message: str, log_type: str | None = None):
+    """Отправить сообщение в канал/группу логов без тем."""
     print(f"!!! send_log_to_group_sync: {message}")
     group_id = settings.TELEGRAM_LOG_GROUP_ID
     if not group_id:
@@ -80,12 +89,14 @@ def send_log_to_group_sync(message: str):
         return
     send_message_sync(group_id, message)
 
-def send_photo_sync(chat_id, photo_path, caption=None, retries=3):
+
+def send_photo_sync(chat_id, photo_path, caption=None, retries=3, message_thread_id=None, log_type=None):
     """
     Синхронная отправка фото через requests с повторными попытками при ошибке 429.
+    Параметры message_thread_id/log_type сохранены для обратной совместимости,
+    но не используются (отправка без тем).
     """
-    token = settings.TELEGRAM_BOT_TOKEN
-    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    url = _telegram_method_url('sendPhoto')
     for attempt in range(retries):
         try:
             with open(photo_path, 'rb') as photo:
@@ -99,7 +110,7 @@ def send_photo_sync(chat_id, photo_path, caption=None, retries=3):
                 return True
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 429 and attempt < retries - 1:
-                wait = 2 ** attempt  # экспоненциальная задержка: 1, 2, 4 секунды
+                wait = 2 ** attempt
                 logger.warning(f"Rate limited (429), waiting {wait}s before retry {attempt+1}/{retries}")
                 time.sleep(wait)
             else:
