@@ -1,5 +1,6 @@
 from asgiref.sync import sync_to_async
-from apps.core.models import Employee, Device, QRCode, RegistrationRequest, DeviceType, Department, AdminScope
+from django.apps import apps
+from apps.core.models import Employee, Device, QRCode, RegistrationRequest, DeviceType, Department
 
 
 
@@ -8,7 +9,12 @@ def _region_filter_for_admin(telegram_id):
     if not admin_emp:
         return None
 
-    scope = AdminScope.objects.filter(employee=admin_emp).prefetch_related('allowed_regions').first()
+    try:
+        admin_scope_model = apps.get_model('core', 'AdminScope')
+    except LookupError:
+        return None
+
+    scope = admin_scope_model.objects.filter(employee=admin_emp).prefetch_related('allowed_regions').first()
     if not scope or scope.can_manage_all_regions:
         return None
 
@@ -476,7 +482,12 @@ def send_movement_card_to_print(card_id, admin_telegram_id):
     if not admin_emp:
         return False, 'Администратор не найден'
 
-    scope = AdminScope.objects.filter(employee=admin_emp).first()
+    try:
+        admin_scope_model = apps.get_model('core', 'AdminScope')
+    except LookupError:
+        return False, 'Модель прав администратора недоступна'
+
+    scope = admin_scope_model.objects.filter(employee=admin_emp).first()
     if not scope or not scope.can_print_from_bot:
         return False, 'Печать из бота отключена в настройках Django'
     if scope.printer_backend != 'http' or not scope.printer_endpoint:
