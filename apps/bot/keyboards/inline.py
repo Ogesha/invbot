@@ -13,6 +13,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔹 Управление QR", callback_data="admin_qr_menu"),
             InlineKeyboardButton(text="🔄 Перемещение техники", callback_data="admin_move_device_menu")
         )
+        builder.row(InlineKeyboardButton(text="🖥 Техника", callback_data="admin_devices_menu"))
     else:
         builder.row(InlineKeyboardButton(text="ℹ️ Как сканировать QR", callback_data="qr_info"))
     return builder.as_markup()

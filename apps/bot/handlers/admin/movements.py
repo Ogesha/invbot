@@ -32,10 +32,20 @@ async def move_device_menu(callback: CallbackQuery, state: FSMContext):
             callback_data=f"move_dev_{device.id}"
         ))
     kb.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_main"))
-    await callback.message.edit_text("Выберите технику для изменения ответственного:", reply_markup=kb.as_markup())
+    await callback.message.edit_text("Выберите технику для создания карточки перемещения (смена ответственного):", reply_markup=kb.as_markup())
     await state.set_state(MoveDeviceStates.waiting_for_device)
     await callback.answer()
 
+
+
+
+@router.callback_query(F.data.regexp(r"^move_dev_\d+$"))
+async def select_device_for_move_direct(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет прав", show_alert=True)
+        return
+    await state.set_state(MoveDeviceStates.waiting_for_device)
+    await select_device_for_move(callback, state)
 
 @router.callback_query(MoveDeviceStates.waiting_for_device, F.data.startswith("move_dev_"))
 async def select_device_for_move(callback: CallbackQuery, state: FSMContext):

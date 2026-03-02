@@ -273,13 +273,18 @@ def get_all_devices(admin_telegram_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(department__region_id__in=region_ids)
+            qs = qs.filter(region_id__in=region_ids)
     return list(qs.order_by('inventory_number'))
 
 @sync_to_async
-def get_device_data(device_id):
+def get_device_data(device_id, admin_telegram_id=None):
+    qs = Device.objects.select_related('department', 'responsible', 'device_type')
+    if admin_telegram_id is not None:
+        region_ids = _region_filter_for_admin(admin_telegram_id)
+        if region_ids is not None:
+            qs = qs.filter(region_id__in=region_ids)
     try:
-        return Device.objects.select_related('department', 'responsible').get(id=device_id)
+        return qs.get(id=device_id)
     except Device.DoesNotExist:
         return None
 
@@ -327,7 +332,7 @@ def get_devices_without_qr(admin_telegram_id=None):
     if admin_telegram_id is not None:
         region_ids = _region_filter_for_admin(admin_telegram_id)
         if region_ids is not None:
-            qs = qs.filter(department__region_id__in=region_ids)
+            qs = qs.filter(region_id__in=region_ids)
     return list(qs.order_by('inventory_number'))
 
 @sync_to_async
@@ -455,6 +460,74 @@ def reject_request(request_id, comment=""):
         return True, req
     except Exception as e:
         return False, str(e)
+
+
+
+@sync_to_async
+def create_device(inventory_number, name, device_type_id, department_id=None, responsible_id=None, status='in_use', admin_telegram_id=None):
+    if Device.objects.filter(inventory_number=inventory_number).exists():
+        return False, 'Техника с таким инвентарным номером уже существует'
+
+    region_id = None
+    if department_id:
+        dept = Department.objects.filter(id=department_id).select_related('region').first()
+        if not dept:
+            return False, 'Отдел не найден'
+        region_id = dept.region_id
+
+    if admin_telegram_id is not None:
+        region_ids = _region_filter_for_admin(admin_telegram_id)
+        if region_ids is not None and region_id and region_id not in region_ids:
+            return False, 'Нет доступа к выбранному региону'
+
+    device = Device.objects.create(
+        inventory_number=inventory_number,
+        name=name,
+        device_type_id=device_type_id,
+        department_id=department_id,
+        responsible_id=responsible_id,
+        status=status,
+        region_id=region_id,
+    )
+    return True, device
+
+
+@sync_to_async
+def update_device_status(device_id, status, admin_telegram_id=None):
+    if status not in {'in_use', 'not_in_use', 'reserve'}:
+        return False, 'Некорректный статус'
+
+    qs = Device.objects.all()
+    if admin_telegram_id is not None:
+        region_ids = _region_filter_for_admin(admin_telegram_id)
+        if region_ids is not None:
+            qs = qs.filter(region_id__in=region_ids)
+
+    device = qs.filter(id=device_id).first()
+    if not device:
+        return False, 'Техника не найдена или нет доступа'
+
+    device.status = status
+    device.save(update_fields=['status'])
+    return True, f'Статус обновлён: {device.inventory_number} — {device.get_status_display()}'
+
+
+@sync_to_async
+def delete_device(device_id, admin_telegram_id=None):
+    qs = Device.objects.all()
+    if admin_telegram_id is not None:
+        region_ids = _region_filter_for_admin(admin_telegram_id)
+        if region_ids is not None:
+            qs = qs.filter(region_id__in=region_ids)
+
+    device = qs.filter(id=device_id).first()
+    if not device:
+        return False, 'Техника не найдена или нет доступа'
+
+    inv = device.inventory_number
+    name = device.name
+    device.delete()
+    return True, f'Удалена техника: {inv} — {name}'
 
 @sync_to_async
 def create_device_with_qr(code, name, inventory_number, device_type_id, department_id=None, responsible_id=None):
