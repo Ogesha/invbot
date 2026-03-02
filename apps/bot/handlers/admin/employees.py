@@ -1,5 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from aiogram.types import InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from asgiref.sync import sync_to_async
 from aiogram.exceptions import TelegramBadRequest
@@ -28,7 +30,7 @@ def get_department_by_id(dept_id):
         return None
 
 # ---------- Редактирование сотрудника ----------
-@router.callback_query(F.data.startswith("emp_edit_"))
+@router.callback_query(F.data.regexp(r"^emp_edit_\d+$"))
 async def employee_edit_card(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Нет прав", show_alert=True)
@@ -91,7 +93,7 @@ async def edit_employee_dept_start(callback: CallbackQuery, state: FSMContext):
         return
     emp_id = int(callback.data.split("_")[-1])
     await state.update_data(emp_id=emp_id)
-    depts = await get_all_departments()
+    depts = await get_all_departments(callback.from_user.id)
     if not depts:
         await callback.message.edit_text("Нет доступных отделов.", reply_markup=cancel_keyboard())
         return
@@ -128,7 +130,7 @@ async def approve_employee(callback: CallbackQuery):
     await back_to_main_menu(callback, callback.from_user.id)
 
 # ---------- Удаление сотрудника ----------
-@router.callback_query(F.data.startswith("emp_delete_"))
+@router.callback_query(F.data.regexp(r"^emp_delete_\d+$"))
 async def delete_employee_confirm(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Нет прав", show_alert=True)
@@ -198,7 +200,7 @@ async def back_to_dept_employees(callback: CallbackQuery):
         return
     from apps.core.models import Department
     dept = await sync_to_async(Department.objects.get)(name=emp_data['department_name'])
-    employees = await get_employees_by_department(dept.id)
+    employees = await get_employees_by_department(dept.id, callback.from_user.id)
     kb = employees_by_department_keyboard(employees, dept.id, page=1)
     try:
         await callback.message.edit_text(
@@ -229,7 +231,7 @@ async def process_employee_fullname(message: Message, state: FSMContext):
         await message.answer("Слишком короткое имя. Введите ФИО полностью.")
         return
     await state.update_data(full_name=full_name)
-    depts = await get_all_departments()
+    depts = await get_all_departments(message.from_user.id)
     if not depts:
         await message.answer("В системе нет отделов. Сначала создайте отдел через /add_department или в админке.")
         await state.clear()
@@ -282,7 +284,7 @@ async def show_all_employees(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Нет прав", show_alert=True)
         return
-    employees = await get_all_employees_data()
+    employees = await get_all_employees_data(callback.from_user.id)
     if not employees:
         await callback.message.edit_text("Список сотрудников пуст.")
         await back_to_main_menu(callback, callback.from_user.id)

@@ -3,8 +3,8 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
-from ..keyboards.inline import main_menu_keyboard
-from ..utils.db import is_admin
+from apps.bot.keyboards.inline import main_menu_keyboard
+from apps.bot.utils.db import is_admin
 
 router = Router()
 
