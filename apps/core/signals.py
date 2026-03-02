@@ -20,8 +20,12 @@ def device_pre_save_handler(sender, instance, **kwargs):
     if not isinstance(instance, Device):
         return
 
-    if instance.department and getattr(instance, 'region_id', None) != instance.department.region_id:
-        instance.region = instance.department.region
+    if instance.department:
+        dept_region_id = getattr(instance.department, 'region_id', None)
+        if dept_region_id is None and hasattr(instance.department, 'region'):
+            dept_region_id = getattr(instance.department.region, 'id', None)
+        if getattr(instance, 'region_id', None) != dept_region_id and dept_region_id is not None:
+            instance.region_id = dept_region_id
 
     if not instance.pk:
         return
