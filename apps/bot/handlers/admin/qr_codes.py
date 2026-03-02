@@ -145,7 +145,7 @@ async def create_qr_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(QrCreateStates.confirmation, F.data == "createqr_yes")
 async def create_qr_execute(callback: CallbackQuery, state: FSMContext):
-    qr = await create_qr_code()
+    qr = await create_qr_code(callback.from_user.id)
     await callback.message.edit_text(
         f"✅ QR‑код создан!\nID: {qr.id}\nКод: {qr.code}"
     )
@@ -199,7 +199,7 @@ async def select_free_qr(callback: CallbackQuery, state: FSMContext):
     qr_id = int(callback.data.split("_")[-1])
     await state.update_data(qr_id=qr_id)
     # Показываем только устройства без QR
-    devices = await get_devices_without_qr()
+    devices = await get_devices_without_qr(callback.from_user.id)
     if not devices:
         await callback.message.edit_text("Нет доступных устройств без QR.")
         await state.clear()
@@ -215,7 +215,7 @@ async def process_device_select(callback: CallbackQuery, state: FSMContext):
     device_id = int(callback.data.split("_")[-1])
     data = await state.get_data()
     qr_id = data['qr_id']
-    success, msg = await assign_qr_to_device(qr_id, device_id)
+    success, msg = await assign_qr_to_device(qr_id, device_id, callback.from_user.id)
     await callback.message.edit_text(msg)
     await state.clear()
     await back_to_main_menu(callback, callback.from_user.id)

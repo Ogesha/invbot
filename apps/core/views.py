@@ -68,11 +68,18 @@ def assign_qr_to_device(request):
         device = get_object_or_404(Device, id=device_id)
 
         for qr in qr_list:
-            if device.qr_code and device.qr_code != qr:
-                old_qr = device.qr_code
-                old_qr.device = None
-                old_qr.save()
-                old_qr.generate_simple_image()
+            try:
+                existing_qr = device.qr_code
+            except QRCode.DoesNotExist:
+                existing_qr = None
+
+            # Привязываем только к свободной технике
+            if existing_qr and existing_qr != qr:
+                messages.error(
+                    request,
+                    f"❌ Устройство {device.inventory_number} уже имеет QR-код (ID {existing_qr.id})."
+                )
+                return redirect('admin:core_qrcode_changelist')
 
             qr.device = device
             qr.save()
@@ -123,7 +130,7 @@ def generate_qr_api(request):
     back_color = request.GET.get('back_color', 'white')
 
     qr = qrcode.QRCode(
-        version=1,
+        version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_L,
         box_size=10,
         border=4,
@@ -365,3 +372,30 @@ def import_devices_from_excel(request):
         return JsonResponse({'status': 'ok', 'results': results})
 
     return render(request, 'admin/import_excel.html')
+
+@csrf_exempt
+def movement_card_print_endpoint(request):
+    if request.method != 'POST':
+        return JsonResponse({'detail': 'Method not allowed'}, status=405)
+
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except Exception:
+        payload = {}
+
+    card_id = payload.get('movement_card_id')
+    if not card_id:
+        return JsonResponse({'detail': 'movement_card_id is required'}, status=400)
+
+    from .models import MovementCard
+    card = MovementCard.objects.select_related('device').filter(id=card_id).first()
+    if not card:
+        return JsonResponse({'detail': 'movement card not found'}, status=404)
+
+    # Заглушка интеграции печати: endpoint подтверждает прием карточки.
+    return JsonResponse({
+        'status': 'accepted',
+        'movement_card_id': card.id,
+        'device_inventory': card.device.inventory_number if card.device else None,
+    })

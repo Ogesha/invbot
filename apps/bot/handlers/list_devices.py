@@ -20,7 +20,7 @@ async def cmd_list_start(message: Message, state: FSMContext):
         await message.answer("⛔ У вас нет прав для просмотра всего списка.")
         return
 
-    departments = await get_departments()
+    departments = await get_departments(message.from_user.id)
     await message.answer(
         "Выберите отдел для фильтрации (или 'Все отделы'):",
         reply_markup=departments_keyboard(departments, action_prefix="list_filter_dep")
@@ -64,7 +64,8 @@ async def process_status(callback: CallbackQuery, state: FSMContext):
     devices = await get_all_devices_filtered(
         department_id=None if department == 'all' else int(department),
         device_type_id=None if device_type == 'all' else int(device_type),
-        status=status
+        status=status,
+        admin_telegram_id=callback.from_user.id
     )
 
     if not devices:
